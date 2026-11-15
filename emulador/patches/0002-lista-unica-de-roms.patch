@@ -90,7 +90,7 @@ index 9b847bc..4b37ab2 100644
      menu_t *menu;
      menu_entry_t *menu_entry;
      (void) caller_menu;
-@@ -595,6 +614,201 @@ static void callback_selectedgbcgame(menu_t *caller_menu) {
+@@ -595,6 +614,213 @@ static void callback_selectedgbcgame(menu_t *caller_menu) {
  }
  #endif
  
@@ -180,6 +180,18 @@ index 9b847bc..4b37ab2 100644
 +        gambatte_p->saveSavedata(); // keep the previous game's progress
 +    }
 +    std::string fullgamepath = mpgb_roms[idx];
++    struct stat romst;
++    if (stat(fullgamepath.c_str(), &romst) == 0 && romst.st_size < 0x150) {
++        // Empty or cut-off file (smaller than the cartridge header): almost
++        // always a copy that never reached the card because it was pulled
++        // out of the PC before the data was written. Gambatte would read
++        // garbage as the header, so say what really happened.
++        mpgb_log_error(fullgamepath, "arquivo vazio/incompleto: copie de novo e ejete o cartao no PC antes de tirar");
++        mpgb_last_error = "ROM VAZIA: RECOPIE";
++        printOverlay(mpgb_last_error.c_str());
++        caller_menu->quit = 1;
++        return;
++    }
 +    gamename = mpgb_basename(fullgamepath);
 +    currgamename = strip_Extension(gamename);
 +    loadConfig();

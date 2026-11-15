@@ -57,11 +57,28 @@ scripts/build-firmware.sh          # imagem completa
 FAZER_SDK=1 scripts/build-emulador.sh   # SDK + binário do modo rápido
 ```
 
+Num contêiner Ubuntu 22.04 (ex.: `distrobox` no Fedora/Bazzite), instale além das
+dependências do workflow: `subversion patch autoconf automake libtool pkg-config gettext texinfo`
+(o runner do GitHub já vem com elas).
+
+Depois de mudar um patch em `emulador/patches/`, recompile só o emulador e refaça a imagem
+(`-rebuild` **não** reaplica os patches; use `-dirclean`):
+
+```sh
+# dentro do contêiner (distrobox enter ...), a partir da raiz do repositório
+cd build/buildroot
+make BR2_EXTERNAL=$PWD/../../firmware gambatte-meupocketgb-dirclean
+make MINIMAL=yes all    # a imagem nova sai como output/images/miyoo-*.img
+```
+
 ## Se algo der errado
 
 - Se um jogo não abrir, o motivo aparece no topo da lista (ex.: *ROM INVALIDA*) e
   fica anotado no arquivo `meupocketgb-erros.txt`, na partição **ROMS**.
   Se o emulador travar, as últimas mensagens dele também vão para esse arquivo.
+- *ROM VAZIA: RECOPIE*: o arquivo está com 0 bytes. No Linux, a partição ext4 grava o
+  conteúdo dos arquivos só alguns segundos depois da cópia. Se o cartão sair antes,
+  ficam só os nomes. Copie de novo e **ejete** o cartão (ou rode `sync`) antes de tirá-lo.
 - A partição ROMS da imagem completa é ext4. No Linux, o sistema libera a escrita
   nela a cada boot. Se o cartão ainda pedir administrador, rode uma vez no terminal:
   `sudo chmod -R a+rwX /run/media/$USER/ROMS`
