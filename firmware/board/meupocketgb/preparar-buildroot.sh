@@ -34,4 +34,16 @@ find board/miyoo/main -mindepth 1 -maxdepth 1 \
 rm -rf board/miyoo/roms/NES board/miyoo/roms/GBA
 cp "$HERE/roms/LEIA-ME.txt" board/miyoo/roms/LEIA-ME.txt
 
+# 5) Power-on screen: u-boot shows boot/miyoo-splash.bmp (Miyoo logo + version)
+#    while the kernel loads. Keep the file (u-boot expects it) but make it
+#    plain black, so no logo shows up before the game list.
+#    tela-preta.bmp is a ready 8-bit 320x240 BMP: u-boot's CFB only draws
+#    4/8/24-bit BMPs, and ImageMagick saves a one-color image as 1-bit.
+cp "$HERE/boot/tela-preta.bmp" board/miyoo/meupocketgb-splash.bmp
+GENIMG=board/miyoo/scripts/genimage.sh
+if grep -q '^convert board/miyoo/miyoo-splash.png' "$GENIMG"; then
+	sed -i 's|^convert board/miyoo/miyoo-splash.png .*BMP3:"${BINARIES_DIR}"/boot/miyoo-splash.bmp$|cp board/miyoo/meupocketgb-splash.bmp "${BINARIES_DIR}"/boot/miyoo-splash.bmp|' "$GENIMG"
+fi
+grep -q '^cp board/miyoo/meupocketgb-splash.bmp' "$GENIMG" || { echo "genimage.sh: logo do boot nao foi trocado" >&2; exit 1; }
+
 echo "buildroot preparado para o MeuPocketGB"

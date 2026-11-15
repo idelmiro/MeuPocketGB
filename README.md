@@ -15,6 +15,8 @@ e este projeto também é.
 | Tela inicial | GMenu2X | Lista de jogos `.gb` e `.gbc` juntos |
 | Emuladores | Dezenas (RetroArch + IPKs) | Só o Gambatte |
 | Logo animado no boot | Sim | Não |
+| Logo do Miyoo ao ligar | Sim | Tela preta |
+| Teste de RAID6 do kernel a cada boot | Sim (~1,2 s) | Não |
 | USB (MTP) no boot | Sim | Desligado (dá para religar no `options.cfg`) |
 | Save do jogo | Gravado ao sair do emulador | Gravado ~2 s depois que o jogo salva |
 
@@ -71,6 +73,17 @@ make BR2_EXTERNAL=$PWD/../../firmware gambatte-meupocketgb-dirclean
 make MINIMAL=yes all    # a imagem nova sai como output/images/miyoo-*.img
 ```
 
+Depois de mudar `firmware/board/meupocketgb/linux.fragment` (kernel):
+
+```sh
+make BR2_EXTERNAL=$PWD/../../firmware linux-reconfigure linux-fusion-dirclean
+make MINIMAL=yes all
+```
+
+O `linux-fusion` guarda uma cópia dos módulos do kernel e, sem o `dirclean`, a imagem
+sai com os módulos antigos. Sempre use `MINIMAL=yes`: sem ele a imagem fica com 3 GB e
+o `main.img` grande continua lá (apague `output/images/main.img` para voltar ao normal).
+
 ## Se algo der errado
 
 - Se um jogo não abrir, o motivo aparece no topo da lista (ex.: *ROM INVALIDA*) e
@@ -109,5 +122,6 @@ scripts. Para atualizar, troque o commit e confira se o *teste* e o *firmware* p
 
 ## Ideias para depois
 
-- Boot ainda mais rápido: tirar mensagens do kernel e o atraso do u-boot.
+- Boot ainda mais rápido: medir o tempo do `/etc/main` até a lista aparecer (o u-boot já
+  não espera e o kernel já liga com `quiet`).
 - Tirar do Gambatte os menus de configuração que não forem usados.

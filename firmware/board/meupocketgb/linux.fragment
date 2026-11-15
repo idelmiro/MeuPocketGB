@@ -1,0 +1,7 @@
+# MeuPocketGB: applied on top of the MiyooCFW kernel defconfig ("miyoo").
+#
+# Mounting the btrfs MAIN partition loads raid6_pq, which by default
+# benchmarks every RAID6 routine before choosing one: ~1.2 s on the
+# PocketGo at every boot (dmesg "raid6: int32x8 gen() ..."). The card has
+# no RAID, so just take the first routine without measuring.
+# CONFIG_RAID6_PQ_BENCHMARK is not set
