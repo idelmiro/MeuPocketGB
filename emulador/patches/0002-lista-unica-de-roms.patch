@@ -9,7 +9,7 @@ new file mode 100644
 index 0000000..41be70d
 --- /dev/null
 +++ b/Makefile.meupocketgb
-@@ -0,0 +1,34 @@
+@@ -0,0 +1,35 @@
 +# MeuPocketGB: Gambatte-DMS for the PocketGo (v1)
 +#  - opens straight into a single list with the .gb and .gbc games
 +#  - writes the in-game save to the card a couple of seconds after the game saves
@@ -41,8 +41,9 @@ index 0000000..41be70d
 +include common.mk
 +
 +ifneq ($(STATIC),1)
-+# Shared build: only the libraries Gambatte really calls.
-+LDFLAGS = -lSDL -lSDL_image -lSDL_mixer -lz -lm -pthread -lstdc++ -Wl,--as-needed -Wl,--gc-sections $(EXTRA_LDFLAGS)
++# Shared build: only the libraries Gambatte really calls. libstdc++/libgcc go
++# inside the binary: resolving libstdc++.so symbols took ~0.4 s at every start.
++LDFLAGS = -lSDL -lSDL_image -lSDL_mixer -lz -lm -pthread -Wl,-Bstatic -lstdc++ -Wl,-Bdynamic -static-libgcc -Wl,--as-needed -Wl,--gc-sections $(EXTRA_LDFLAGS)
 +endif
 diff --git a/gambatte_sdl/menu.cpp b/gambatte_sdl/menu.cpp
 index 9b847bc..4b37ab2 100644
@@ -90,7 +91,7 @@ index 9b847bc..4b37ab2 100644
      menu_t *menu;
      menu_entry_t *menu_entry;
      (void) caller_menu;
-@@ -595,6 +614,213 @@ static void callback_selectedgbcgame(menu_t *caller_menu) {
+@@ -595,6 +614,219 @@ static void callback_selectedgbcgame(menu_t *caller_menu) {
  }
  #endif
  
@@ -290,6 +291,12 @@ index 9b847bc..4b37ab2 100644
 +void rom_browser_startup() {
 +    SDL_EnableKeyRepeat(250, 83);
 +    switchToMenuAudio();
++    // boot-time marker in the kernel log, with the same clock as dmesg
++    FILE *kmsg = fopen("/dev/kmsg", "w");
++    if (kmsg) {
++        fputs("meupocketgb: lista de jogos na tela\n", kmsg);
++        fclose(kmsg);
++    }
 +    while (!gambatte_p->isLoaded()) {
 +        forcemenuexit = 0;
 +        mpgb_show_rom_list(NULL);

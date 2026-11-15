@@ -1,0 +1,47 @@
+MeuPocketGB: sunxi_display: shorter ST7789S (PocketGo) LCD init delays
+
+u-boot waited ~1 s for the PocketGo panel (reset 250 + 150 ms, sleep out
+250 ms, display on 50 + 50 + 100 ms). The ST7789 needs 120 ms after reset
+and 120 ms after sleep out; keep a small margin and drop the rest.
+The panel ID reads are left as they are.
+
+--- a/drivers/video/sunxi/sunxi_display.c	2026-11-15 18:39:30.978941840 -0300
++++ b/drivers/video/sunxi/sunxi_display.c	2026-11-15 18:39:30.990658948 -0300
+@@ -456,10 +456,10 @@
+ 	ret = readl(&gpio->gpio_bank[SUNXI_GPIO_E].dat);
+ 	ret&= ~0x0800;
+ 	writel(ret, &gpio->gpio_bank[SUNXI_GPIO_E].dat);
+-	mdelay(250);
++	mdelay(10); /* MeuPocketGB: LCD reset low >= 10 us (was 250 ms) */
+ 	ret|= 0x0800;
+ 	writel(ret, &gpio->gpio_bank[SUNXI_GPIO_E].dat);
+-	mdelay(150);
++	mdelay(125); /* MeuPocketGB: ST7789 needs 120 ms after reset (was 150 ms) */
+ }
+ 
+ static void lcd_init(void)
+@@ -644,7 +644,7 @@
+ 		break;
+ 	case 2:
+ 		lcd_wr_cmd(0x11);
+-		mdelay(250);
++		mdelay(125); /* MeuPocketGB: 120 ms after sleep out (was 250 ms) */
+ 		lcd_wr_cmd(0x36);
+ 		lcd_wr_dat(madctlCmd);
+ 
+@@ -740,11 +740,12 @@
+ 		lcd_wr_dat(0x28);
+ 		lcd_wr_dat(0x22);
+ 
+-		mdelay(50);
++		/* MeuPocketGB: display on / memory write need no long wait (was 50 + 50 + 100 ms) */
++		mdelay(10);
+ 		lcd_wr_cmd(0x29);
+-		mdelay(50);
++		mdelay(10);
+ 		lcd_wr_cmd(0x2c);
+-		mdelay(100);
++		mdelay(10);
+ 		break;
+ 	case 3:
+ 		lcd_wr_cmd(0xa4);

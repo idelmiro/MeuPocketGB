@@ -17,8 +17,15 @@ e este projeto também é.
 | Logo animado no boot | Sim | Não |
 | Logo do Miyoo ao ligar | Sim | Tela preta |
 | Teste de RAID6 do kernel a cada boot | Sim (~1,2 s) | Não |
+| Esperas para ligar a tela (u-boot + kernel) | ~1,8 s | ~0,6 s |
+| Partição MAIN (saves, configurações) | btrfs | ext4 (sem carregar btrfs no boot) |
+| Partição ROMS | ext4 com blocos de 1 KB | ext4 com blocos de 4 KB (monta 5x mais rápido) |
+| Do botão ON até a lista de jogos (PocketGo) | ~7 s (com logos) | ~6,5 s (sem logos) |
 | USB (MTP) no boot | Sim | Desligado (dá para religar no `options.cfg`) |
 | Save do jogo | Gravado ao sair do emulador | Gravado ~2 s depois que o jogo salva |
+| Ao ligar | Menu | Continua o último jogo de onde parou (SELECT segurado = lista) |
+| Tela de boot | Logo do Miyoo + animação | Nome do console em arte ASCII + barra de progresso |
+| Ombros L e R no jogo | L = avanço rápido (sem som), R = menu | Sem função (o menu fica no botão de atalho) |
 
 O último item importa porque a chave ON/OFF do PocketGo corta a energia na hora.
 No Gambatte original, quem desliga sem sair do emulador perde o progresso.
@@ -73,16 +80,39 @@ make BR2_EXTERNAL=$PWD/../../firmware gambatte-meupocketgb-dirclean
 make MINIMAL=yes all    # a imagem nova sai como output/images/miyoo-*.img
 ```
 
-Depois de mudar `firmware/board/meupocketgb/linux.fragment` (kernel):
+Depois de mudar o kernel (`linux.fragment` ou um patch em `firmware/board/meupocketgb/kernel/`):
 
 ```sh
-make BR2_EXTERNAL=$PWD/../../firmware linux-reconfigure linux-fusion-dirclean
+make BR2_EXTERNAL=$PWD/../../firmware linux-dirclean linux-fusion-dirclean
 make MINIMAL=yes all
 ```
+
+Depois de mudar um patch do u-boot (`firmware/board/meupocketgb/uboot/`):
+
+```sh
+make BR2_EXTERNAL=$PWD/../../firmware uboot-dirclean
+make MINIMAL=yes all
+```
+
+O kernel e o u-boot do MiyooCFW vêm de `origin/master`, sem commit fixo. Se um dos nossos
+patches deixar de aplicar, o build para e avisa: ajuste o patch ao código novo.
+O u-boot tem só 1 KB de memória no começo (`SYS_MALLOC_F_LEN=0x400`): ligar
+`CONFIG_BOOTSTAGE` faz ele travar antes de acender a tela.
 
 O `linux-fusion` guarda uma cópia dos módulos do kernel e, sem o `dirclean`, a imagem
 sai com os módulos antigos. Sempre use `MINIMAL=yes`: sem ele a imagem fica com 3 GB e
 o `main.img` grande continua lá (apague `output/images/main.img` para voltar ao normal).
+
+## Continuar o jogo
+
+Ao ligar, o console abre o último jogo já no ponto em que você estava. Enquanto você
+joga, o estado é gravado em `.gambatte/saves/<jogo>_continuar.gqs` (partição MAIN):
+a cada minuto, sempre que o jogo grava o próprio save e quando o menu é aberto. É um
+arquivo à parte: os slots de save state 0 a 9 do menu não são tocados.
+
+- Para escolher outro jogo: **segure SELECT ao ligar**, ou use *Load Game* no menu.
+- Se a ROM do último jogo sumiu ou está vazia, o console abre a lista.
+- O último jogo fica anotado em `.gambatte/ultimo-jogo.txt` (apagar = ligar na lista).
 
 ## Se algo der errado
 
@@ -99,7 +129,8 @@ o `main.img` grande continua lá (apague `output/images/main.img` para voltar ao
 ## Estrutura do repositório
 
 ```
-emulador/patches/   mudanças no Gambatte-DMS (lista única de ROMs, save automático, teste)
+emulador/patches/   mudanças no Gambatte-DMS (lista única de ROMs, save automático,
+                    marcas de tempo, continuar o jogo, L/R sem função)
 cartao/             arquivos do modo rápido (vão para a partição BOOT)
 firmware/           árvore externa do Buildroot (BR2_EXTERNAL)
   configs/meupocketgb.fragment     o que entra e o que sai da imagem
@@ -122,6 +153,13 @@ scripts. Para atualizar, troque o commit e confira se o *teste* e o *firmware* p
 
 ## Ideias para depois
 
-- Boot ainda mais rápido: medir o tempo do `/etc/main` até a lista aparecer (o u-boot já
-  não espera e o kernel já liga com `quiet`).
+- Boot ainda mais rápido. Para medir, crie um arquivo vazio `medir-boot.txt` na partição
+  ROMS: 20 s depois de ligar ele recebe o log do kernel com as marcas `meupocketgb:` de
+  cada etapa (apague o arquivo para parar). Onde ainda vai o tempo (PocketGo, nov/2026,
+  total ~6,5 s): ~3,1 s antes do kernel (ROM do chip, SPL, u-boot, leitura do kernel
+  no cartão), ~1 s do kernel, ~0,5 s montando as partições, 0,5 s ligando a tela,
+  0,23 s do som (módulo), 0,28 s até o Gambatte rodar, 0,27 s no vídeo do SDL e 0,19 s
+  no som do SDL (ALSA).
+- O PocketGo v1 não tem armazenamento interno: o F1C100s só tem 32 MB de RAM e liga
+  direto do cartão SD (o sistema original da Miyoo também roda do cartão).
 - Tirar do Gambatte os menus de configuração que não forem usados.

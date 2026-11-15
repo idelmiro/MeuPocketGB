@@ -41,7 +41,7 @@ support/kconfig/merge_config.sh -m .config \
 make BR2_EXTERNAL="$EXT" olddefconfig
 
 # check that the important choices survived kconfig
-for opt in BR2_PACKAGE_GAMBATTE_MEUPOCKETGB=y; do
+for opt in BR2_PACKAGE_GAMBATTE_MEUPOCKETGB=y BR2_LINUX_KERNEL_LZ4=y; do
 	grep -qx "$opt" .config || { echo "ERRO: $opt nao ficou no .config" >&2; exit 1; }
 done
 for opt in BR2_PACKAGE_GMENU2X BR2_PACKAGE_RETROARCH BR2_PACKAGE_IPK_GAMBATTE; do

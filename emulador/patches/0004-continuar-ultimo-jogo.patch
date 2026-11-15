@@ -1,0 +1,309 @@
+MeuPocketGB: ao ligar, continua o ultimo jogo de onde parou
+
+A chave ON/OFF do PocketGo corta a energia na hora, entao "salvar estado
+ao sair" nunca acontece. Enquanto o jogo roda, o estado vai para
+<saves>/<jogo>_continuar.gqs (arquivo proprio, fora dos slots 0-9): a cada
+minuto, sempre que o jogo grava o proprio save (o estado nunca fica mais
+velho que o .sav) e ao abrir o menu. Gravacao atomica (tmp + fsync +
+rename).
+
+Ao ligar, abre o ultimo jogo (.gambatte/ultimo-jogo.txt) ja nesse estado.
+Segurando SELECT ao ligar, ou se a ROM sumiu ou esta vazia, mostra a lista.
+"Load Game" no menu continua abrindo a lista, com o jogo atual marcado.
+
+diff --git a/gambatte_sdl/menu.cpp b/gambatte_sdl/menu.cpp
+index 77874e0..43776b2 100644
+--- a/gambatte_sdl/menu.cpp
++++ b/gambatte_sdl/menu.cpp
+@@ -21,6 +21,9 @@
+ #include <sys/stat.h>
+ #include <strings.h>
+ #include <unistd.h>
++#include <fcntl.h>
++#include <sys/ioctl.h>
++#include <linux/input.h>
+ #include <vector>
+ #include <algorithm>
+ #endif
+@@ -673,6 +676,7 @@ static void mpgb_scan(const std::string &dir, int depth) {
+ }
+ 
+ static std::string mpgb_last_error; // shown as the list title after a failed load
++static std::string mpgb_current_rom; // game running now (highlighted in the list)
+ 
+ // Appends load errors to <ROM folder>/meupocketgb-erros.txt, readable from the PC.
+ static void mpgb_log_error(const std::string &rom, const std::string &reason) {
+@@ -687,19 +691,106 @@ static void mpgb_log_error(const std::string &rom, const std::string &reason) {
+     sync();
+ }
+ 
+-static void mpgb_callback_selected(menu_t *caller_menu) {
+-    int idx = caller_menu->selected_entry;
+-    if (idx < 0 || idx >= (int)mpgb_roms.size())
++/* ==================== MEUPOCKETGB: CONTINUE THE LAST GAME ====================
++ * The PocketGo power switch cuts power at once, so "save state on exit"
++ * never happens. Instead, while a game runs, its state goes to
++ * <saves>/<game>_continuar.gqs (a file of its own, not one of the 0-9 slots):
++ * every minute, whenever the game writes its own save (so the state is never
++ * older than the .sav) and when the menu opens. At power-on the last game
++ * is loaded straight into that state. Hold SELECT while turning on to get
++ * the game list instead; "Load Game" in the menu also opens the list.
++ */
++static std::string mpgb_last_game_file() {
++    return homedir + "/.gambatte/ultimo-jogo.txt";
++}
++
++// write+fsync a temporary file, then rename it over the real one
++static bool mpgb_commit_file(const std::string &tmp, const std::string &path) {
++    int fd = open(tmp.c_str(), O_RDONLY);
++    if (fd < 0)
++        return false;
++    fsync(fd);
++    close(fd);
++    if (rename(tmp.c_str(), path.c_str()) != 0)
++        return false;
++    std::string dir = path.substr(0, path.rfind('/'));
++    fd = open(dir.c_str(), O_RDONLY);
++    if (fd >= 0) {
++        fsync(fd);
++        close(fd);
++    }
++    return true;
++}
++
++static void mpgb_remember_game(const std::string &rompath) {
++    std::string path = mpgb_last_game_file(), tmp = path + ".tmp";
++    FILE *f = fopen(tmp.c_str(), "w");
++    if (!f)
+         return;
+-    playMenuSound_ok();
+-    SDL_Delay(250);
+-    if (gambatte_p->isLoaded()) {
+-        if (stateautosave == 1) {
+-            statesave_dms(0); //autosave state 0
+-        }
+-        gambatte_p->saveSavedata(); // keep the previous game's progress
++    fprintf(f, "%s\n", rompath.c_str());
++    fclose(f);
++    mpgb_commit_file(tmp, path);
++}
++
++static std::string mpgb_read_last_game() {
++    std::string rom;
++    FILE *f = fopen(mpgb_last_game_file().c_str(), "r");
++    if (!f)
++        return rom;
++    char buf[1024];
++    if (fgets(buf, sizeof buf, f)) {
++        rom = buf;
++        while (!rom.empty() && (rom[rom.size() - 1] == '\n' || rom[rom.size() - 1] == '\r'))
++            rom.erase(rom.size() - 1);
++    }
++    fclose(f);
++    return rom;
++}
++
++static std::string mpgb_resume_state_path() {
++    std::string p = gambatte_p->getSaveStatePath(0); // <saves>/<game>_0.gqs
++    std::string::size_type at = p.rfind("_0.gqs");
++    if (at == std::string::npos)
++        return std::string();
++    return p.substr(0, at) + "_continuar.gqs";
++}
++
++void mpgb_save_resume_state() {
++    if (!gambatte_p->isLoaded() || can_reset != 1) // not during the boot ROM animation
++        return;
++    std::string path = mpgb_resume_state_path();
++    if (path.empty())
++        return;
++    std::string tmp = path + ".tmp";
++    if (gambatte_p->saveState(blitter_p->inBuf().pixels, blitter_p->inBuf().pitch, tmp)
++            && mpgb_commit_file(tmp, path))
++        printf("MeuPocketGB: resume state written\n");
++    else
++        unlink(tmp.c_str());
++}
++
++// SELECT (KEY_ESC on the PocketGo keypad) held right now?
++static bool mpgb_select_held() {
++    for (int i = 0; i < 8; ++i) {
++        char dev[32];
++        snprintf(dev, sizeof dev, "/dev/input/event%d", i);
++        int fd = open(dev, O_RDONLY | O_NONBLOCK);
++        if (fd < 0)
++            continue;
++        unsigned char keys[KEY_MAX / 8 + 1];
++        memset(keys, 0, sizeof keys);
++        bool held = ioctl(fd, EVIOCGKEY(sizeof keys), keys) >= 0
++                && (keys[KEY_ESC / 8] & (1 << (KEY_ESC % 8)));
++        close(fd);
++        if (held)
++            return true;
+     }
+-    std::string fullgamepath = mpgb_roms[idx];
++    return false;
++}
++
++// Load a ROM. On failure sets mpgb_last_error (shown as the list title) and
++// returns false. With resume, also loads the game's "continue" state.
++static bool mpgb_open_rom(const std::string &fullgamepath, bool resume) {
+     struct stat romst;
+     if (stat(fullgamepath.c_str(), &romst) == 0 && romst.st_size < 0x150) {
+         // Empty or cut-off file (smaller than the cartridge header): almost
+@@ -709,8 +800,7 @@ static void mpgb_callback_selected(menu_t *caller_menu) {
+         mpgb_log_error(fullgamepath, "arquivo vazio/incompleto: copie de novo e ejete o cartao no PC antes de tirar");
+         mpgb_last_error = "ROM VAZIA: RECOPIE";
+         printOverlay(mpgb_last_error.c_str());
+-        caller_menu->quit = 1;
+-        return;
++        return false;
+     }
+     gamename = mpgb_basename(fullgamepath);
+     currgamename = strip_Extension(gamename);
+@@ -735,25 +825,49 @@ static void mpgb_callback_selected(menu_t *caller_menu) {
+         else
+             mpgb_last_error = "ERRO AO ABRIR ROM";
+         printOverlay(mpgb_last_error.c_str());
+-        caller_menu->quit = 1; // reopen the list showing the error as its title
++        return false;
++    }
++    mpgb_last_error.clear();
++    showoverlay = -1; // drop any old message so it doesn't show over the game
++    clearAllCheats(); //clear all cheatcodes from menus
++    if (gambatte_p->isCgb()) {
++        gameiscgb = 1;
++        loadFilter(filtername);
+     } else {
+-        mpgb_last_error.clear();
+-        showoverlay = -1; // drop any old message so it doesn't show over the game
+-        clearAllCheats(); //clear all cheatcodes from menus
+-        if (gambatte_p->isCgb()) {
+-            gameiscgb = 1;
+-            loadFilter(filtername);
+-        } else {
+-            gameiscgb = 0;
+-            loadPalette(palname);
+-        }
+-        firstframe = 0; //reset the frame counter
+-        if (stateautoload == 1) {
+-            stateload_dms(0); //autoload state 0
++        gameiscgb = 0;
++        loadPalette(palname);
++    }
++    firstframe = 0; //reset the frame counter
++    std::string resumestate = mpgb_resume_state_path();
++    struct stat st;
++    if (resume && !resumestate.empty() && stat(resumestate.c_str(), &st) == 0
++            && gambatte_p->loadState(resumestate)) {
++        can_reset = 1;
++        printf("MeuPocketGB: resumed %s\n", resumestate.c_str());
++    } else if (stateautoload == 1) {
++        stateload_dms(0); //autoload state 0
++    }
++    mpgb_current_rom = fullgamepath;
++    mpgb_remember_game(fullgamepath);
++    return true;
++}
++
++static void mpgb_callback_selected(menu_t *caller_menu) {
++    int idx = caller_menu->selected_entry;
++    if (idx < 0 || idx >= (int)mpgb_roms.size())
++        return;
++    playMenuSound_ok();
++    SDL_Delay(250);
++    if (gambatte_p->isLoaded()) {
++        if (stateautosave == 1) {
++            statesave_dms(0); //autosave state 0
+         }
+-        forcemenuexit = 2;
+-        caller_menu->quit = 1;
++        mpgb_save_resume_state(); // the previous game continues from here later
++        gambatte_p->saveSavedata(); // keep the previous game's progress
+     }
++    if (mpgb_open_rom(mpgb_roms[idx], false))
++        forcemenuexit = 2;
++    caller_menu->quit = 1; // on error the list reopens showing it as its title
+ }
+ 
+ static int mpgb_last_selected = 0;
+@@ -766,6 +880,9 @@ static void mpgb_show_rom_list(menu_t *caller_menu) {
+     std::string romdir = mpgb_romdir();
+     mpgb_scan(romdir, 1);
+     std::sort(mpgb_roms.begin(), mpgb_roms.end(), mpgb_less);
++    for (std::size_t i = 0; i < mpgb_roms.size(); ++i)
++        if (mpgb_roms[i] == mpgb_current_rom)
++            mpgb_last_selected = (int)i;
+ 
+     menu = new_menu();
+     menu_set_header(menu, menu_main_title.c_str());
+@@ -816,6 +933,14 @@ void rom_browser_startup() {
+         fputs("meupocketgb: lista de jogos na tela\n", kmsg);
+         fclose(kmsg);
+     }
++    std::string last = mpgb_read_last_game();
++    struct stat st;
++    if (!last.empty() && stat(last.c_str(), &st) == 0) {
++        if (mpgb_select_held())
++            printf("MeuPocketGB: SELECT held, showing the game list\n");
++        else
++            mpgb_open_rom(last, true);
++    }
+     while (!gambatte_p->isLoaded()) {
+         forcemenuexit = 0;
+         mpgb_show_rom_list(NULL);
+diff --git a/gambatte_sdl/menu.h b/gambatte_sdl/menu.h
+index 73e4350..4c9919e 100644
+--- a/gambatte_sdl/menu.h
++++ b/gambatte_sdl/menu.h
+@@ -16,6 +16,7 @@ int init_menu();
+ void main_menu();
+ #ifdef MEUPOCKETGB
+ void rom_browser_startup();
++void mpgb_save_resume_state();
+ #endif
+ void main_menu_with_anim();
+ void show_fps(SDL_Surface *surface, int fps);
+diff --git a/gambatte_sdl/src/gambatte_sdl.cpp b/gambatte_sdl/src/gambatte_sdl.cpp
+index e274049..849c3f4 100644
+--- a/gambatte_sdl/src/gambatte_sdl.cpp
++++ b/gambatte_sdl/src/gambatte_sdl.cpp
+@@ -1216,6 +1216,7 @@ int GambatteSdl::run(long const sampleRate, int const latency, int const periods
+ 	bool audioOutBufLow = false;
+ #ifdef MEUPOCKETGB
+ 	unsigned autosaveFrames = 0;
++	unsigned resumeFrames = 0;
+ #endif
+ 	int ffwd = 0;
+ 	int ffwd_speed = 6;
+@@ -1272,6 +1273,9 @@ int GambatteSdl::run(long const sampleRate, int const latency, int const periods
+ 
+ 		if(menuin == -2){
+ 			menuin = -1;
++#ifdef MEUPOCKETGB
++			mpgb_save_resume_state(); // menu opened: keep where the game is
++#endif
+ 			main_menu();
+ 		}
+ 
+@@ -1281,8 +1285,19 @@ int GambatteSdl::run(long const sampleRate, int const latency, int const periods
+ 		// after saving in the game then keeps the progress.
+ 		if (vidFrameDoneSampleCnt >= 0 && ++autosaveFrames >= 120) {
+ 			autosaveFrames = 0;
+-			if (gambatte.saveSavedataIfChanged())
++			// The game just saved: write the "continue" state too, so it is
++			// never older than the .sav (loading an older state would bring
++			// the old in-game save back).
++			if (gambatte.saveSavedataIfChanged()) {
+ 				std::puts("MeuPocketGB: savedata written");
++				mpgb_save_resume_state();
++				resumeFrames = 0;
++			}
++		}
++		// and about once a minute while playing, to continue from there
++		if (vidFrameDoneSampleCnt >= 0 && ++resumeFrames >= 3600) {
++			resumeFrames = 0;
++			mpgb_save_resume_state();
+ 		}
+ #endif
+ 	}

@@ -19,6 +19,31 @@ export GAMBATTE_ROMDIR="${ROMS}"
 export FRONTEND="meupocketgb"
 GAMBATTE=/usr/bin/gambatte-meupocketgb
 
+# boot-time markers in the kernel log (same clock as dmesg)
+# marca <step> [percent]: kernel-log marker + boot screen progress bar
+marca(){ echo "meupocketgb: $1" > /dev/kmsg 2>/dev/null; test -n "$2" && progresso "$2"; }
+
+# Boot screen: console name (ASCII art from /etc/tela-boot.txt, the same
+# drawing u-boot shows as an image before) and a progress bar on row 28.
+# Text console is 40x30 (8x8 font). Only text is written: costs a few ms.
+TELA=false
+tela_boot(){
+	test "x${DEBUG_MSG}" = "xyes" && return   # first boot / debug: keep the logs visible
+	TELA=true
+	printf '\033[?25l\033[2J\033[H\033[1;37m'   # hide cursor, clear, bright white
+	cat /etc/tela-boot.txt
+}
+progresso(){
+	$TELA || return 0
+	n=$(( $1 / 5 )); i=0; b=""
+	while test $i -lt 20; do
+		if test $i -lt $n; then b="${b}#"; else b="${b}."; fi
+		i=$((i + 1))
+	done
+	printf '\033[28;7H\033[1;32m[%s] %3d%%\033[0;30m' "$b" "$1"
+}
+marca "inicio do /etc/main"
+
 LOGS=/dev/null
 LOGS_TEMP=/dev/null
 UMTPR_LOGS=/dev/null
@@ -47,6 +72,7 @@ if ! $FRONTEND_ACTIVE; then
 	test -r "${HOME}/.date.conf" \
 	 && date "+%Y-%m-%d %H:%M" -s "$(cat ${HOME}/.date.conf)" >> "${LOGS}" 2>&1
 
+	marca "video"
 	# --- video (driver chosen by the kernel/u-boot for this screen) ---
 	video=$(cat /sys/kernel/miyoo_video/miyoo_video) \
 	 || echo "Couldn't read /sys/kernel/miyoo_video/miyoo_video" >> "${LOGS}"
@@ -61,6 +87,8 @@ if ! $FRONTEND_ACTIVE; then
 	export TVOUT="OFF"
 	touch /tmp/tvout.disabled
 
+	tela_boot
+	marca "sound" 10
 	# --- sound ---
 	cmdline=$(cat /proc/cmdline 2>/dev/null)
 	snd_val=$(echo "$cmdline" | sed -n 's/.*miyoo\.miyoo_snd=\([0-9]\+\).*/\1/p')
@@ -69,6 +97,7 @@ if ! $FRONTEND_ACTIVE; then
 	test -z "$tvjack_val" && tvjack_val=0
 	modprobe miyoo miyoo_snd="$snd_val" miyoo_tvjack="$tvjack_val" >> "${LOGS}" 2>&1
 
+	marca "first boot" 25
 	# --- first boot: device detection, partition resize, ROMS as FAT32 ---
 	if grep -sq FIRSTBOOT\=\1 "${OPTIONS_CFG}"; then
 		test -r "${BOOTDIR}/firstboot.done" && sh "${BOOTDIR}/firstboot.done"
@@ -79,18 +108,21 @@ if ! $FRONTEND_ACTIVE; then
 		rm "${HOME}/firstboot.completed"
 	fi
 
+	marca "fsck" 30
 	# --- repair filesystems only if the last power-off left them dirty ---
 	if ! grep -sq FS_CHECK\=\0 "${OPTIONS_CFG}"; then
-		if dmesg | grep -q "mmcblk0p1"; then
+		# read the kernel log once and match it in the shell (no extra processes)
+		KMSG="$(dmesg)"
+		if case "$KMSG" in *mmcblk0p1*) true;; *) false;; esac; then
 			umount /dev/mmcblk0p1 >> "${LOGS}" 2>&1
 			fsck.vfat -y /dev/mmcblk0p1 >> "${LOGS}" 2>&1
 			mount /dev/mmcblk0p1 "${BOOTDIR}" -t vfat -o ro,exec,utf8 >> "${LOGS}" 2>&1
 		fi
-		if dmesg | grep -q "EXT4-fs (mmcblk0p5): warning: mounting fs with errors"; then
+		if case "$KMSG" in *"EXT4-fs (mmcblk0p5): warning: mounting fs with errors"*) true;; *) false;; esac; then
 			umount /dev/mmcblk0p5 >> "${LOGS}" 2>&1
 			e2fsck -y /dev/mmcblk0p5 >> "${LOGS}" 2>&1
 			mount /dev/mmcblk0p5 "${ROMS}" -o rw,noatime >> "${LOGS}" 2>&1
-		elif dmesg | grep -q "FAT-fs (mmcblk0p5): Volume was not properly unmounted"; then
+		elif case "$KMSG" in *"FAT-fs (mmcblk0p5): Volume was not properly unmounted"*) true;; *) false;; esac; then
 			umount /dev/mmcblk0p5 >> "${LOGS}" 2>&1
 			fsck.vfat -y /dev/mmcblk0p5 >> "${LOGS}" 2>&1
 			mount /dev/mmcblk0p5 "${ROMS}" -t vfat -o rw,utf8 >> "${LOGS}" 2>&1
@@ -102,6 +134,7 @@ if ! $FRONTEND_ACTIVE; then
 		restore_temp_log_func
 	fi
 
+	marca "hotkeys" 40
 	# --- hotkeys (volume/brightness) + optional custom script on BOOT ---
 	if test -r "${BOOTDIR}/normalboot.custom.sh"; then
 		(cd "${BOOTDIR}" && sh normalboot.custom.sh)
@@ -124,11 +157,19 @@ if grep -sq USB_OTG\=\1 "${OPTIONS_CFG}"; then
 	export USB_MODE
 fi
 
+marca "liberar ROMS" 50
 # ROMS on ext4/btrfs: let a normal user on a Linux PC copy/delete games
-# (the partition is created by root, so without this only an admin can write)
-find "${ROMS}" -maxdepth 2 ! -name lost+found ! -perm -0666 -exec chmod a+rwX {} + 2>/dev/null
+# (the partition is created by root, so without this only an admin can write).
+# In the background: the game list does not need to wait for it.
+find "${ROMS}" -maxdepth 2 ! -name lost+found ! -perm -0666 -exec chmod a+rwX {} + 2>/dev/null &
 
-clear
+marca "iniciando o Gambatte" 80
+# Boot timing: an empty ROMS/medir-boot.txt makes this boot save the kernel
+# log there (with the "meupocketgb:" markers) 20 s after power-on.
+if test -e "${ROMS}/medir-boot.txt"; then
+	(sleep 20; dmesg > "${ROMS}/medir-boot.txt"; sync) &
+fi
+$TELA || clear   # with the boot screen, keep it until the game list replaces it
 cd "${HOME}"
 touch /tmp/frontend.active
 # Gambatte is the only program. If it ever closes ("Quit" in its menu),

@@ -1,0 +1,43 @@
+MeuPocketGB: st7789sfb: shorter LCD init delays
+
+The panel init waited 750 ms in total (150 + 150 + 250 + 50 + 50 + 100).
+The ST7789 needs 120 ms after reset and 120 ms after sleep out; keep a
+small margin and drop the rest (280 ms total).
+
+--- a/drivers/video/fbdev/st7789sfb.c	2026-11-15 18:30:30.474212829 -0300
++++ b/drivers/video/fbdev/st7789sfb.c	2026-11-15 18:30:30.486782876 -0300
+@@ -347,13 +347,15 @@
+ static void init_lcd(void)
+ {
+     suniv_gpio_init();
++    /* MeuPocketGB: ST7789 timings: reset low >= 10 us, 120 ms after reset,
++     * 120 ms after sleep out (was 150 + 150 + 250 ms) */
+     suniv_clrbits(iomm.lcdc + PE_DATA, (1 << 11));
+-    mdelay(150);
++    mdelay(10);
+     suniv_setbits(iomm.lcdc + PE_DATA, (1 << 11));
+-    mdelay(150);
++    mdelay(125);
+ 
+     lcdc_wr_cmd(0x11);
+-    mdelay(250);
++    mdelay(125);
+                   
+     lcdc_wr_cmd(0x36);
+     if (flip) {
+@@ -471,11 +473,12 @@
+ //    lcdc_wr_dat(0x28);
+ //    lcdc_wr_dat(0x22);
+ 
+-    mdelay(50);
++    /* MeuPocketGB: display on / memory write need no long wait (was 50 + 50 + 100 ms) */
++    mdelay(10);
+     lcdc_wr_cmd(0x29);
+-    mdelay(50);
++    mdelay(10);
+     lcdc_wr_cmd(0x2c);
+-    mdelay(100);
++    mdelay(10);
+ 
+     mypar->app_virt->yoffset = 0;
+     memset(mypar->vram_virt, 0, 320*240*4);

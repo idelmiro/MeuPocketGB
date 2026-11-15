@@ -1,0 +1,36 @@
+MeuPocketGB: ombros L e R sem funcao durante o jogo
+
+- R (BACKSPACE) abria o menu, igual ao botao de atalho: agora so o botao
+  de atalho abre o menu.
+- L (TAB) segurado era o avanco rapido, que roda o jogo sem som (parecia
+  que o som tinha sumido): avanco rapido desligado.
+
+diff --git a/gambatte_sdl/src/gambatte_sdl.cpp b/gambatte_sdl/src/gambatte_sdl.cpp
+index 849c3f4..fdee865 100644
+--- a/gambatte_sdl/src/gambatte_sdl.cpp
++++ b/gambatte_sdl/src/gambatte_sdl.cpp
+@@ -1122,7 +1122,11 @@ bool GambatteSdl::handleEvents(BlitterWrapper &blitter) {
+ 				} else {
+ 					switch (e.key.keysym.sym) {
+ 					case SDLK_RCTRL: // R button in bittboy / Reset button in PocketGo / Menu button in PlayGO
++#ifndef MEUPOCKETGB
++					// MeuPocketGB: the R shoulder does nothing in game (only the
++					// shortcut button opens the menu)
+ 					case SDLK_BACKSPACE: // R trigger
++#endif
+ 					case SDLK_HOME: // Power button in Opendingux devices
+ 					case SDLK_END: // Power/Suspend button in RetroFW devices
+ 					case SDLK_q: // Power button in Funkey-S devices
+@@ -1189,6 +1193,12 @@ static std::size_t const gb_samples_per_frame = 35112;
+ static std::size_t const gambatte_max_overproduction = 2064;
+ 
+ static bool isFastForward(Uint8 const *keys) {
++#ifdef MEUPOCKETGB
++	// MeuPocketGB: no fast-forward. Holding the L shoulder (TAB) used to run
++	// the game fast without sound, which looked like the sound was off.
++	(void)keys;
++	return false;
++#endif
+ 	if (ffwhotkey == 1) {
+ #if defined VERSION_FUNKEYS
+ 		return keys[SDLK_m];

@@ -11,6 +11,23 @@ BR2_TARGET_GENERIC_ISSUE="MeuPocketGB"
 
 # --- kernel: faster boot (see board/meupocketgb/linux.fragment) -------------
 BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_MEUPOCKETGB_PATH)/board/meupocketgb/linux.fragment"
+# LZ4 instead of gzip: zImage is a bit bigger but unpacks much faster on the ARM9
+BR2_LINUX_KERNEL_LZ4=y
+# MiyooCFW kernel patches + ours (shorter LCD init delays)
+BR2_LINUX_KERNEL_PATCH="board/miyoo/kernel $(BR2_EXTERNAL_MEUPOCKETGB_PATH)/board/meupocketgb/kernel"
+
+# --- u-boot: shorter LCD init delays (see board/meupocketgb/uboot/) ---
+# Note: CONFIG_BOOTSTAGE does not fit here (only 1 KB of early malloc,
+# SYS_MALLOC_F_LEN=0x400): u-boot hangs before the screen turns on.
+BR2_TARGET_UBOOT_PATCH="$(BR2_EXTERNAL_MEUPOCKETGB_PATH)/board/meupocketgb/uboot"
+
+# --- SDL: fewer libraries to load when Gambatte starts ---------------------
+# SDL uses fbcon here; with DirectFB on, libSDL/SDL_image/SDL_mixer all pull
+# libdirectfb + libfusion + libts at every start. Gambatte only reads PNG/BMP.
+BR2_PACKAGE_SDL_DIRECTFB2=n
+BR2_PACKAGE_SDL_IMAGE_JPEG=n
+BR2_PACKAGE_SDL_IMAGE_TIFF=n
+BR2_PACKAGE_SDL_IMAGE_WEBP=n
 
 # --- frontends, other emulators and apps -----------------------------------
 BR2_PACKAGE_GMENU2X=n

@@ -1,0 +1,89 @@
+MeuPocketGB: marcas de tempo da inicializacao no log do kernel
+
+Cada etapa da partida do Gambatte grava "meupocketgb: gambatte: ..." em
+/dev/kmsg, no mesmo relogio do dmesg. Junto com as marcas do /etc/main
+mostra onde vai o tempo entre ligar e a lista de jogos aparecer
+(ROMS/medir-boot.txt).
+
+diff --git a/gambatte_sdl/src/gambatte_sdl.cpp b/gambatte_sdl/src/gambatte_sdl.cpp
+index fcd6cac..e274049 100644
+--- a/gambatte_sdl/src/gambatte_sdl.cpp
++++ b/gambatte_sdl/src/gambatte_sdl.cpp
+@@ -660,6 +660,20 @@ static void printControls() {
+ }
+ 
+ #ifdef ROM_BROWSER
++#ifdef MEUPOCKETGB
++// MeuPocketGB: boot-time marker in the kernel log (same clock as dmesg)
++static void mpgb_mark(const char *what) {
++	FILE *k = std::fopen("/dev/kmsg", "w");
++	if (k) {
++		std::fprintf(k, "meupocketgb: gambatte: %s\n", what);
++		std::fclose(k);
++	}
++}
++#define MPGB_MARK(what) mpgb_mark(what)
++#else
++#define MPGB_MARK(what)
++#endif
++
+ int GambatteSdl::exec(int const argc, char const *const argv[]) {
+ 	std::puts("Gambatte SDL"
+ #ifdef GAMBATTE_SDL_VERSION_STR
+@@ -744,7 +758,9 @@ int GambatteSdl::exec(int const argc, char const *const argv[]) {
+ 		}
+ 	}
+ 
++	MPGB_MARK("argumentos lidos");
+ 	loadConfig(); // load default.cfg file on startup
++	MPGB_MARK("config lida");
+ 
+ 	for (std::size_t i = 0; i < inputOption.numMappings(); ++i) {
+ 		std::pair<InputId, InputGetter::Button> m;
+@@ -773,9 +789,17 @@ int GambatteSdl::exec(int const argc, char const *const argv[]) {
+ 	std::string savedir = (homedir + "/.gambatte/saves/");
+ 	gambatte.setSaveDir(savedir);
+ 
++#ifdef MEUPOCKETGB
++	// time video and audio separately (SdlIniter below then finds both ready)
++	SDL_InitSubSystem(SDL_INIT_VIDEO);
++	MPGB_MARK("SDL video");
++	SDL_InitSubSystem(SDL_INIT_AUDIO);
++	MPGB_MARK("SDL audio");
++#endif
+ 	SdlIniter sdlIniter;
+ 	if (sdlIniter.isFailed())
+ 		return EXIT_FAILURE;
++	MPGB_MARK("SDL_Init");
+ 
+ 	if (!jdevnums.empty()
+ 			&& SDL_InitSubSystem(SDL_INIT_JOYSTICK) < 0) {
+@@ -793,6 +817,7 @@ int GambatteSdl::exec(int const argc, char const *const argv[]) {
+ 
+ 	blitter.CheckIPU();
+ 	blitter.setBufferDimensions(); //set appropiate resolution on startup
++	MPGB_MARK("modo de video");
+ 
+ 	SDL_ShowCursor(SDL_DISABLE);
+ 	SDL_WM_SetCaption("Gambatte SDL", 0);
+@@ -800,10 +825,12 @@ int GambatteSdl::exec(int const argc, char const *const argv[]) {
+ 	init_fps_font(); // load fps font on startup
+ 	init_menu(); //load menu font on startup
+ 	init_menusurfaces(); //init menu surfaces on startup
++	MPGB_MARK("fontes e menu");
+ 
+ 	gameiscgb = 0;
+ 	loadPalette(palname); //load palette for initial menu on startup
+ 	load_border(dmgbordername); //load DMG border for initial menu on startup
++	MPGB_MARK("paleta e borda");
+ 
+ 	//gb/gbc bootloader support
+ 	gambatte.setBootloaderGetter(get_bootloader_from_file);
+@@ -1267,6 +1294,7 @@ int GambatteSdl::run(long const sampleRate, int const latency, int const periods
+ } // anon namespace
+ 
+ int main(int argc, char **argv) {
++	MPGB_MARK("main");
+ 	GambatteSdl gambatteSdl;
+ 	return gambatteSdl.exec(argc, argv);
+ }

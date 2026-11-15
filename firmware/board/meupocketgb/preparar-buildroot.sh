@@ -35,15 +35,33 @@ rm -rf board/miyoo/roms/NES board/miyoo/roms/GBA
 cp "$HERE/roms/LEIA-ME.txt" board/miyoo/roms/LEIA-ME.txt
 
 # 5) Power-on screen: u-boot shows boot/miyoo-splash.bmp (Miyoo logo + version)
-#    while the kernel loads. Keep the file (u-boot expects it) but make it
-#    plain black, so no logo shows up before the game list.
-#    tela-preta.bmp is a ready 8-bit 320x240 BMP: u-boot's CFB only draws
-#    4/8/24-bit BMPs, and ImageMagick saves a one-color image as 1-bit.
-cp "$HERE/boot/tela-preta.bmp" board/miyoo/meupocketgb-splash.bmp
+#    while the kernel loads. Replace it with our boot screen: the console name
+#    in ASCII art + an empty progress bar, drawn with the kernel's 8x8 font so
+#    it matches what /etc/main shows next (boot/gerar-tela-boot.py makes it).
+#    u-boot's CFB only draws 4/8/24-bit BMPs: tela-boot.bmp is 8-bit 320x240.
+cp "$HERE/boot/tela-boot.bmp" board/miyoo/meupocketgb-splash.bmp
 GENIMG=board/miyoo/scripts/genimage.sh
 if grep -q '^convert board/miyoo/miyoo-splash.png' "$GENIMG"; then
 	sed -i 's|^convert board/miyoo/miyoo-splash.png .*BMP3:"${BINARIES_DIR}"/boot/miyoo-splash.bmp$|cp board/miyoo/meupocketgb-splash.bmp "${BINARIES_DIR}"/boot/miyoo-splash.bmp|' "$GENIMG"
 fi
 grep -q '^cp board/miyoo/meupocketgb-splash.bmp' "$GENIMG" || { echo "genimage.sh: logo do boot nao foi trocado" >&2; exit 1; }
+
+# 6) ROMS ext4 with 4 KiB blocks. The image is small (136M), so mkfs picks
+#    the "small" profile (1 KiB blocks); after firstboot grows it to the
+#    whole card that means thousands of block groups and a slow mount
+#    (~0.6 s on a 32 GB card). "-T default" keeps the normal 4 KiB layout.
+sed -i 's|^mkfs.ext4 -d "${BINARIES_DIR}/roms/" -v |mkfs.ext4 -b 4096 -T default -d "${BINARIES_DIR}/roms/" -v |' "$GENIMG"
+grep -q '^mkfs.ext4 -b 4096 -T default ' "$GENIMG" || { echo "genimage.sh: mkfs da ROMS nao foi ajustado" >&2; exit 1; }
+
+# 7) MAIN (saves, settings) as ext4 instead of btrfs. Mounting btrfs makes the
+#    kernel load btrfs + raid6 + xor (with a speed test) at every boot: ~0.5 s.
+#    firstboot still offers BTRFS as the alternative and fixes inittab itself.
+sed -i 's|^mkfs.btrfs -r "${BINARIES_DIR}/main/" -b ${MAIN_SIZE} .*$|dd if=/dev/zero of=${image} bs=${MAIN_SIZE} count=1 \&\& mkfs.ext4 -b 4096 -T default -d "${BINARIES_DIR}/main/" -v -L ${label} ${image}|' "$GENIMG"
+grep -q '^dd if=/dev/zero of=${image} bs=${MAIN_SIZE} count=1 && mkfs.ext4 ' "$GENIMG" || { echo "genimage.sh: MAIN ainda em btrfs" >&2; exit 1; }
+INITTAB=board/miyoo/rootfs/etc/inittab
+sed -i -e 's|^::sysinit:/sbin/modprobe btrfs$|#&|' \
+       -e 's|^\(::sysinit:/bin/mount /dev/mmcblk0p4 /mnt\) -o .*$|\1 -o rw,noatime,exec|' "$INITTAB"
+grep -q '^#::sysinit:/sbin/modprobe btrfs$' "$INITTAB" && grep -q '^::sysinit:/bin/mount /dev/mmcblk0p4 /mnt -o rw,noatime,exec$' "$INITTAB" \
+	|| { echo "inittab: MAIN ainda montada como btrfs" >&2; exit 1; }
 
 echo "buildroot preparado para o MeuPocketGB"
