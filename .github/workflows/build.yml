@@ -20,6 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Dependencias
+        timeout-minutes: 15
         run: sudo apt-get update && sudo apt-get install -y libsdl1.2-dev libsdl-image1.2-dev libsdl-mixer1.2-dev zlib1g-dev
       - name: Baixar Gambatte-DMS e aplicar patches
         run: |
@@ -44,6 +45,7 @@ jobs:
         uses: easimon/maximize-build-space@v10
         with:
           root-reserve-mb: 4096
+          overprovision-lvm: true
           remove-dotnet: true
           remove-android: true
           remove-haskell: true
@@ -51,6 +53,7 @@ jobs:
           remove-docker-images: true
       - uses: actions/checkout@v4
       - name: Dependencias
+        timeout-minutes: 15
         run: sudo apt-get update && sudo apt-get install -y wget unzip build-essential git bc swig libncurses-dev libpython3-dev libssl-dev cpio rsync python3 imagemagick file
       - name: Pasta do SDK
         run: sudo mkdir -p /opt/miyoo && sudo chown "$USER" /opt/miyoo
@@ -96,6 +99,7 @@ jobs:
           remove-docker-images: true
       - uses: actions/checkout@v4
       - name: Dependencias
+        timeout-minutes: 15
         run: sudo apt-get update && sudo apt-get install -y wget unzip build-essential git bc swig libncurses-dev libpython3-dev libssl-dev cpio rsync python3 imagemagick btrfs-progs gsfonts file
       - name: ccache
         uses: actions/cache@v4
