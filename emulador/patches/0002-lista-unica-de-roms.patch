@@ -45,23 +45,24 @@ index 0000000..41be70d
 +LDFLAGS = -lSDL -lSDL_image -lSDL_mixer -lz -lm -pthread -lstdc++ -Wl,--as-needed -Wl,--gc-sections $(EXTRA_LDFLAGS)
 +endif
 diff --git a/gambatte_sdl/menu.cpp b/gambatte_sdl/menu.cpp
-index 9b847bc..159365f 100644
+index 9b847bc..4b37ab2 100644
 --- a/gambatte_sdl/menu.cpp
 +++ b/gambatte_sdl/menu.cpp
-@@ -17,6 +17,12 @@
+@@ -17,6 +17,13 @@
  #include <stdlib.h>
  #include <dirent.h>
  #include <math.h>
 +#ifdef MEUPOCKETGB
 +#include <sys/stat.h>
 +#include <strings.h>
++#include <unistd.h>
 +#include <vector>
 +#include <algorithm>
 +#endif
  
  #include "src/audiosink.h"
  
-@@ -200,7 +206,11 @@ static void callback_about(menu_t *caller_menu);
+@@ -200,7 +207,11 @@ static void callback_about(menu_t *caller_menu);
  static void callback_quit(menu_t *caller_menu);
  static void callback_return(menu_t *caller_menu);
  
@@ -73,7 +74,7 @@ index 9b847bc..159365f 100644
  
  void main_menu_with_anim() {//create a single menu frame to make the entry animation
  
-@@ -388,7 +398,15 @@ static void callback_restart(menu_t *caller_menu) {
+@@ -388,7 +399,15 @@ static void callback_restart(menu_t *caller_menu) {
  static void callback_loaddmggame(menu_t *caller_menu);
  static void callback_loadgbcgame(menu_t *caller_menu);
  
@@ -89,7 +90,7 @@ index 9b847bc..159365f 100644
      menu_t *menu;
      menu_entry_t *menu_entry;
      (void) caller_menu;
-@@ -595,6 +613,166 @@ static void callback_selectedgbcgame(menu_t *caller_menu) {
+@@ -595,6 +614,201 @@ static void callback_selectedgbcgame(menu_t *caller_menu) {
  }
  #endif
  
@@ -151,6 +152,21 @@ index 9b847bc..159365f 100644
 +    closedir(d);
 +}
 +
++static std::string mpgb_last_error; // shown as the list title after a failed load
++
++// Appends load errors to <ROM folder>/meupocketgb-erros.txt, readable from the PC.
++static void mpgb_log_error(const std::string &rom, const std::string &reason) {
++    std::string logpath = mpgb_romdir() + "/meupocketgb-erros.txt";
++    FILE *f = fopen(logpath.c_str(), "a");
++    if (!f)
++        return;
++    struct stat st;
++    long size = stat(rom.c_str(), &st) == 0 ? (long)st.st_size : -1;
++    fprintf(f, "%s | %s | %ld bytes\n", rom.c_str(), reason.c_str(), size);
++    fclose(f);
++    sync();
++}
++
 +static void mpgb_callback_selected(menu_t *caller_menu) {
 +    int idx = caller_menu->selected_entry;
 +    if (idx < 0 || idx >= (int)mpgb_roms.size())
@@ -167,10 +183,30 @@ index 9b847bc..159365f 100644
 +    gamename = mpgb_basename(fullgamepath);
 +    currgamename = strip_Extension(gamename);
 +    loadConfig();
-+    if (gambatte_p->load(fullgamepath.c_str(), 0 + 0 + 0, prefercgb) < 0) {
-+        printf("failed to load ROM: %s\n", fullgamepath.c_str());
-+        printOverlay("Erro ao abrir ROM");
++    gambatte::LoadRes const res = gambatte_p->load(fullgamepath.c_str(), 0 + 0 + 0, prefercgb);
++    if (res < 0) {
++        std::string reason = gambatte::to_string(res);
++        if (reason.empty()) {
++            char code[32];
++            snprintf(code, sizeof code, "codigo %d", (int)res);
++            reason = code;
++        }
++        printf("failed to load ROM: %s: %s\n", fullgamepath.c_str(), reason.c_str());
++        mpgb_log_error(fullgamepath, reason);
++        // short Portuguese text that fits the 20-column title line
++        if (res == gambatte::LOADRES_IO_ERROR)
++            mpgb_last_error = "ERRO DE LEITURA";
++        else if (res == gambatte::LOADRES_BAD_FILE_OR_UNKNOWN_MBC)
++            mpgb_last_error = "ROM INVALIDA";
++        else if (reason.find("Unsupported") == 0)
++            mpgb_last_error = "CARTUCHO NAO SUPORT.";
++        else
++            mpgb_last_error = "ERRO AO ABRIR ROM";
++        printOverlay(mpgb_last_error.c_str());
++        caller_menu->quit = 1; // reopen the list showing the error as its title
 +    } else {
++        mpgb_last_error.clear();
++        showoverlay = -1; // drop any old message so it doesn't show over the game
 +        clearAllCheats(); //clear all cheatcodes from menus
 +        if (gambatte_p->isCgb()) {
 +            gameiscgb = 1;
@@ -201,7 +237,7 @@ index 9b847bc..159365f 100644
 +
 +    menu = new_menu();
 +    menu_set_header(menu, menu_main_title.c_str());
-+    menu_set_title(menu, "Jogos");
++    menu_set_title(menu, mpgb_last_error.empty() ? "Jogos" : mpgb_last_error.c_str());
 +    menu->back_callback = callback_back;
 +
 +    if (mpgb_roms.empty()) {

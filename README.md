@@ -57,6 +57,15 @@ scripts/build-firmware.sh          # imagem completa
 FAZER_SDK=1 scripts/build-emulador.sh   # SDK + binário do modo rápido
 ```
 
+## Se algo der errado
+
+- Se um jogo não abrir, o motivo aparece no topo da lista (ex.: *ROM INVALIDA*) e
+  fica anotado no arquivo `meupocketgb-erros.txt`, na partição **ROMS**.
+  Se o emulador travar, as últimas mensagens dele também vão para esse arquivo.
+- A partição ROMS da imagem completa é ext4. No Linux, o sistema libera a escrita
+  nela a cada boot. Se o cartão ainda pedir administrador, rode uma vez no terminal:
+  `sudo chmod -R a+rwX /run/media/$USER/ROMS`
+
 ## Estrutura do repositório
 
 ```

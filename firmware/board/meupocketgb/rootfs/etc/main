@@ -124,13 +124,26 @@ if grep -sq USB_OTG\=\1 "${OPTIONS_CFG}"; then
 	export USB_MODE
 fi
 
+# ROMS on ext4/btrfs: let a normal user on a Linux PC copy/delete games
+# (the partition is created by root, so without this only an admin can write)
+find "${ROMS}" -maxdepth 2 ! -name lost+found ! -perm -0666 -exec chmod a+rwX {} + 2>/dev/null
+
 clear
 cd "${HOME}"
 touch /tmp/frontend.active
 # Gambatte is the only program. If it ever closes ("Quit" in its menu),
-# write everything to the card and open it again.
+# write everything to the card and open it again. If it crashes, its last
+# messages go to ROMS/meupocketgb-erros.txt so they can be read on the PC.
 while true; do
-	"${GAMBATTE}" >> "${LOGS}" 2>&1
+	"${GAMBATTE}" > /tmp/gambatte.log 2>&1
+	rc=$?
+	cat /tmp/gambatte.log >> "${LOGS}" 2>/dev/null
+	if test $rc -ne 0; then
+		{
+			echo "=== Gambatte fechou com codigo $rc ($(date '+%Y-%m-%d %H:%M')) ==="
+			tail -n 20 /tmp/gambatte.log
+		} >> "${ROMS}/meupocketgb-erros.txt" 2>/dev/null
+	fi
 	sync
 	sleep 1
 done
