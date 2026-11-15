@@ -1,0 +1,79 @@
+# MeuPocketGB: applied on top of miyoo_uclibc_defconfig + the upstream
+# "minimal" fragments (board/miyoo/minconfig/*.config).
+# Goal: keep only what boots the PocketGo, runs firstboot (partitions/FAT32)
+# and runs Gambatte. Everything else is switched off.
+
+# --- our emulator + our /etc/main ------------------------------------------
+BR2_PACKAGE_GAMBATTE_MEUPOCKETGB=y
+BR2_ROOTFS_OVERLAY="board/miyoo/rootfs $(BR2_EXTERNAL_MEUPOCKETGB_PATH)/board/meupocketgb/rootfs"
+BR2_TARGET_GENERIC_HOSTNAME="meupocketgb"
+BR2_TARGET_GENERIC_ISSUE="MeuPocketGB"
+
+# --- frontends, other emulators and apps -----------------------------------
+BR2_PACKAGE_GMENU2X=n
+BR2_PACKAGE_GMENU2X_SKINS=n
+BR2_PACKAGE_GMENU2X_GM2XPKG=n
+BR2_PACKAGE_MIYOO_LOGO=n
+BR2_PACKAGE_SHELLECT=n
+BR2_PACKAGE_COMMANDER=n
+BR2_PACKAGE_SDLBOOK=n
+BR2_PACKAGE_ST_SDL=n
+BR2_PACKAGE_JOYMAP=n
+BR2_PACKAGE_IPK_DRPOCKETSNES=n
+BR2_PACKAGE_IPK_FCEUX=n
+BR2_PACKAGE_IPK_GNGEO=n
+BR2_PACKAGE_IPK_GPSP=n
+BR2_PACKAGE_IPK_RACE=n
+BR2_PACKAGE_IPK_PCSX_REARMED=n
+BR2_PACKAGE_IPK_GAMBATTE=n
+BR2_PACKAGE_RETROARCH=n
+BR2_PACKAGE_LIBRETRO_CORE_INFO=n
+
+# --- graphics/media stacks nobody uses here --------------------------------
+BR2_PACKAGE_XORG7=n
+BR2_PACKAGE_MESA3D=n
+BR2_PACKAGE_LIBGLEW=n
+BR2_PACKAGE_LIBGLU=n
+BR2_PACKAGE_SDL2=n
+BR2_PACKAGE_SDL_GFX=n
+BR2_PACKAGE_SDL_NET=n
+BR2_PACKAGE_SDL_SOUND=n
+BR2_PACKAGE_SDL_MIXER_MIDI_TIMIDITY=n
+BR2_PACKAGE_ESPEAK=n
+BR2_PACKAGE_VORBIS_TOOLS=n
+BR2_PACKAGE_OPENAL=n
+BR2_PACKAGE_X264=n
+BR2_PACKAGE_LIBASS=n
+BR2_PACKAGE_LIBTHEORA=n
+BR2_PACKAGE_PANGO=n
+BR2_PACKAGE_LIBSVG_CAIRO=n
+BR2_PACKAGE_BULLET=n
+BR2_PACKAGE_BOOST=n
+BR2_PACKAGE_FBCAT=n
+BR2_PACKAGE_FBGRAB=n
+
+# --- scripting, debugging, network -----------------------------------------
+BR2_PACKAGE_PYTHON_PYGAME=n
+BR2_PACKAGE_PYTHON_KEYBOARD=n
+BR2_PACKAGE_PYTHON3=n
+BR2_PACKAGE_LUA=n
+BR2_PACKAGE_GDB=n
+BR2_PACKAGE_LTRACE=n
+BR2_PACKAGE_STRACE=n
+BR2_PACKAGE_HOST_GDB=n
+BR2_PACKAGE_DBUS=n
+BR2_PACKAGE_DHCP=n
+BR2_PACKAGE_DROPBEAR=n
+BR2_PACKAGE_PURE_FTPD=n
+BR2_PACKAGE_RSYNC=n
+BR2_PACKAGE_OPKG=n
+BR2_PACKAGE_OPKG_UTILS=n
+BR2_PACKAGE_SCREEN=n
+BR2_PACKAGE_NANO=n
+BR2_PACKAGE_P7ZIP=n
+BR2_PACKAGE_ZIP=n
+
+# Kept on purpose (needed by firstboot, fsck at boot or the hardware):
+# busybox, dialog, dosfstools, e2fsprogs, btrfs-progs, fatresize, parted,
+# gptfdisk, util-linux, alsa-utils, miyoo-daemon, miyoo-ctl, umtprd, SDL 1.2,
+# SDL_image, SDL_mixer, DirectFB, u-boot and the MiyooCFW kernel.

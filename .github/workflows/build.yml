@@ -1,0 +1,145 @@
+name: MeuPocketGB
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+    paths-ignore: ['**.md']
+  pull_request:
+    paths-ignore: ['**.md']
+  workflow_dispatch:
+
+env:
+  GAMBATTE_COMMIT: 0b0416f70ad46a85c298c8d6f5d272f54cf267bc
+  BR_COMMIT: d5912eeb7b636810bafaa34eb0517fd599a0fc71
+
+jobs:
+  # Rapido (~2 min): compila o emulador no PC e testa o save automatico.
+  teste:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependencias
+        run: sudo apt-get update && sudo apt-get install -y libsdl1.2-dev libsdl-image1.2-dev libsdl-mixer1.2-dev zlib1g-dev
+      - name: Baixar Gambatte-DMS e aplicar patches
+        run: |
+          git init -q gambatte && cd gambatte
+          git remote add origin https://github.com/tiopex/gambatte-dms.git
+          git fetch -q --depth 1 origin "$GAMBATTE_COMMIT" && git checkout -qf FETCH_HEAD
+          for p in ../emulador/patches/*.patch; do patch -p1 --no-backup-if-mismatch < "$p"; done
+      - name: Compilar para o PC (checa o codigo)
+        run: make -C gambatte -f Makefile.meupocketgb -j2 CROSS_COMPILE= STATIC=0 SDL_CONFIG=sdl-config OPT_FLAGS="-O1" OUTPUTNAME=gambatte-pc
+      - name: Teste do save automatico
+        run: |
+          curl -fsSL -o ucity.gbc "https://raw.githubusercontent.com/MiyooCFW/buildroot/$BR_COMMIT/board/miyoo/roms/GBC/ucity.gbc"
+          gambatte/tests/run_autosave_test.sh "$PWD/ucity.gbc"
+
+  # Modo rapido: binario estatico + pacote para o cartao que ja tem MiyooCFW.
+  emulador:
+    needs: teste
+    runs-on: ubuntu-22.04
+    timeout-minutes: 350
+    steps:
+      - name: Liberar espaco em disco
+        uses: easimon/maximize-build-space@v10
+        with:
+          root-reserve-mb: 4096
+          remove-dotnet: true
+          remove-android: true
+          remove-haskell: true
+          remove-codeql: true
+          remove-docker-images: true
+      - uses: actions/checkout@v4
+      - name: Dependencias
+        run: sudo apt-get update && sudo apt-get install -y wget unzip build-essential git bc swig libncurses-dev libpython3-dev libssl-dev cpio rsync python3 imagemagick file
+      - name: Pasta do SDK
+        run: sudo mkdir -p /opt/miyoo && sudo chown "$USER" /opt/miyoo
+      - name: SDK em cache
+        id: sdk
+        uses: actions/cache@v4
+        with:
+          path: /opt/miyoo
+          key: sdk-musl-static-min-${{ env.BR_COMMIT }}
+      - name: Compilar o SDK (so na primeira vez)
+        if: steps.sdk.outputs.cache-hit != 'true'
+        run: FAZER_SDK=1 scripts/build-emulador.sh "$PWD/build"
+      - name: Compilar o emulador
+        run: scripts/build-emulador.sh "$PWD/build"
+      - name: Montar pacote do cartao
+        run: |
+          mkdir -p pacote/BOOT/meupocketgb
+          cp -r cartao/BOOT/. pacote/BOOT/
+          cp build/gambatte-meupocketgb pacote/BOOT/meupocketgb/
+          cp cartao/LEIA-ME.md pacote/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: meupocketgb-modo-rapido
+          path: pacote/
+
+  # Fork enxuto: imagem completa do cartao (gravar com Balena Etcher/Rufus).
+  firmware:
+    needs: teste
+    runs-on: ubuntu-22.04
+    timeout-minutes: 350
+    env:
+      FORCE_UNSAFE_CONFIGURE: 1
+    steps:
+      - name: Liberar espaco em disco
+        uses: easimon/maximize-build-space@v10
+        with:
+          root-reserve-mb: 4096
+          overprovision-lvm: true
+          remove-dotnet: true
+          remove-android: true
+          remove-haskell: true
+          remove-codeql: true
+          remove-docker-images: true
+      - uses: actions/checkout@v4
+      - name: Dependencias
+        run: sudo apt-get update && sudo apt-get install -y wget unzip build-essential git bc swig libncurses-dev libpython3-dev libssl-dev cpio rsync python3 imagemagick btrfs-progs gsfonts file
+      - name: ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.buildroot-ccache
+          key: ccache-firmware-${{ github.sha }}
+          restore-keys: ccache-firmware-
+      - name: Compilar a imagem
+        run: |
+          set -o pipefail
+          scripts/build-firmware.sh "$PWD/build" 2>&1 | tee build.log | grep --line-buffered '^>>>' || { tail -n 150 build.log; exit 1; }
+      - name: Compactar imagem
+        run: |
+          mkdir -p saida
+          for img in build/buildroot/output/images/meupocketgb-*.img; do gzip -9 -c "$img" > "saida/$(basename "$img").gz"; done
+          ls -lh saida
+      - uses: actions/upload-artifact@v4
+        with:
+          name: meupocketgb-imagem
+          path: saida/
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: log-firmware
+          path: build.log
+
+  # Ao criar uma tag v1.0, v1.1... publica os dois arquivos numa Release.
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [emulador, firmware]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: arquivos
+      - name: Preparar arquivos
+        run: |
+          (cd arquivos/meupocketgb-modo-rapido && zip -r ../../meupocketgb-modo-rapido.zip .)
+          cp arquivos/meupocketgb-imagem/*.img.gz .
+          ls -lh
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            meupocketgb-modo-rapido.zip
+            *.img.gz

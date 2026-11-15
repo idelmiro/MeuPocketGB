@@ -1,0 +1,337 @@
+MeuPocketGB: grava o save do jogo no cartao quando ele muda
+
+A cada ~2 s (120 quadros) o emulador compara a SRAM/RTC com o ultimo
+save gravado e, se mudou, grava o .sav de forma atomica (arquivo .tmp +
+fsync + rename). Assim desligar pela chave logo depois de salvar no jogo
+nao perde o progresso.
+
+diff --git a/gambatte_sdl/src/gambatte_sdl.cpp b/gambatte_sdl/src/gambatte_sdl.cpp
+index 1977925..fcd6cac 100644
+--- a/gambatte_sdl/src/gambatte_sdl.cpp
++++ b/gambatte_sdl/src/gambatte_sdl.cpp
+@@ -808,7 +808,11 @@ int GambatteSdl::exec(int const argc, char const *const argv[]) {
+ 	//gb/gbc bootloader support
+ 	gambatte.setBootloaderGetter(get_bootloader_from_file);
+ 
++#ifdef MEUPOCKETGB
++	rom_browser_startup(); // MeuPocketGB: boot straight into the game list
++#else
+ 	main_menu();
++#endif
+ 	inputGetter.is = 0;
+ 
+ 	return run(rateOption.rate(), latencyOption.latency(), periodsOption.periods(),
+@@ -1183,6 +1187,9 @@ int GambatteSdl::run(long const sampleRate, int const latency, int const periods
+ 	Uint8 const *const keys = SDL_GetKeyState(0);
+ 	std::size_t bufsamples = 0;
+ 	bool audioOutBufLow = false;
++#ifdef MEUPOCKETGB
++	unsigned autosaveFrames = 0;
++#endif
+ 	int ffwd = 0;
+ 	int ffwd_speed = 6;
+ 
+@@ -1240,6 +1247,17 @@ int GambatteSdl::run(long const sampleRate, int const latency, int const periods
+ 			menuin = -1;
+ 			main_menu();
+ 		}
++
++#ifdef MEUPOCKETGB
++		// MeuPocketGB: about every 2 seconds, write the in-game save (SRAM/RTC)
++		// to the card if the game changed it. Turning the switch off right
++		// after saving in the game then keeps the progress.
++		if (vidFrameDoneSampleCnt >= 0 && ++autosaveFrames >= 120) {
++			autosaveFrames = 0;
++			if (gambatte.saveSavedataIfChanged())
++				std::puts("MeuPocketGB: savedata written");
++		}
++#endif
+ 	}
+ 
+ 	return 0;
+diff --git a/libgambatte/include/gambatte.h b/libgambatte/include/gambatte.h
+index 9757f05..cd5cbd0 100644
+--- a/libgambatte/include/gambatte.h
++++ b/libgambatte/include/gambatte.h
+@@ -119,6 +119,13 @@ public:
+ 	/** Writes persistent cartridge data to disk. Done implicitly on ROM close. */
+ 	void saveSavedata();
+ 
++	/**
++	  * MeuPocketGB: writes persistent cartridge data (.sav/.rtc) only if it
++	  * changed since the last load/save. Returns true if something was written.
++	  * Meant to be called periodically so progress survives a hard power-off.
++	  */
++	bool saveSavedataIfChanged();
++
+ 	/** Returns the savestate path for <statenum> slot */
+ 	std::string getSaveStatePath(int statenum);
+ 
+diff --git a/libgambatte/src/cpu.h b/libgambatte/src/cpu.h
+index 2e0645a..7edfeb3 100644
+--- a/libgambatte/src/cpu.h
++++ b/libgambatte/src/cpu.h
+@@ -32,6 +32,7 @@ public:
+ 	void loadState(SaveState const &state);
+ 	void loadSavedata() { mem_.loadSavedata(); }
+ 	void saveSavedata() { mem_.saveSavedata(); }
++	bool saveSavedataIfChanged() { return mem_.saveSavedataIfChanged(); }
+ 
+ 	void setVideoBuffer(uint_least32_t *videoBuf, std::ptrdiff_t pitch) {
+ 		mem_.setVideoBuffer(videoBuf, pitch);
+diff --git a/libgambatte/src/gambatte.cpp b/libgambatte/src/gambatte.cpp
+index 36f8c3c..0aeed96 100644
+--- a/libgambatte/src/gambatte.cpp
++++ b/libgambatte/src/gambatte.cpp
+@@ -171,6 +171,12 @@ void GB::saveSavedata() {
+ 	}
+ }
+ 
++bool GB::saveSavedataIfChanged() {
++	if (p_->cpu.loaded())
++		return p_->cpu.saveSavedataIfChanged();
++	return false;
++}
++
+ void GB::setDmgPaletteColor(int palNum, int colorNum, unsigned long rgb32) {
+ 	p_->cpu.setDmgPaletteColor(palNum, colorNum, rgb32);
+ }
+diff --git a/libgambatte/src/mem/cartridge.cpp b/libgambatte/src/mem/cartridge.cpp
+index 7ed7626..bd44dd3 100644
+--- a/libgambatte/src/mem/cartridge.cpp
++++ b/libgambatte/src/mem/cartridge.cpp
+@@ -21,7 +21,10 @@
+ #include "../savestate.h"
+ #include "pakinfo_internal.h"
+ #include <cstring>
++#include <cstdio>
+ #include <fstream>
++#include <fcntl.h>
++#include <unistd.h>
+ 
+ namespace gambatte {
+ 
+@@ -713,25 +716,83 @@ void Cartridge::loadSavedata() {
+ 			rtc_.setBaseTime(basetime);
+ 		}
+ 	}
++
++	rememberSavedata();
++}
++
++// MeuPocketGB: write to "<path>.tmp", fsync, then rename over the real file.
++// A power cut (the PocketGo switch cuts power instantly) then leaves either
++// the old save or the new one on the card, never a half-written file.
++static bool writeFileAtomic(std::string const &path, unsigned char const *data, std::size_t size) {
++	std::string const tmp = path + ".tmp";
++	std::FILE *f = std::fopen(tmp.c_str(), "wb");
++	if (!f)
++		return false;
++
++	bool ok = std::fwrite(data, 1, size, f) == size;
++	ok = std::fflush(f) == 0 && ok;
++	ok = fsync(fileno(f)) == 0 && ok;
++	ok = std::fclose(f) == 0 && ok;
++	if (!ok || std::rename(tmp.c_str(), path.c_str()) != 0) {
++		std::remove(tmp.c_str());
++		return false;
++	}
++
++	std::string dir = path;
++	std::string::size_type const slash = dir.rfind('/');
++	dir = slash == std::string::npos ? "." : dir.substr(0, slash ? slash : 1);
++	int const dfd = open(dir.c_str(), O_RDONLY);
++	if (dfd >= 0) {
++		fsync(dfd);
++		close(dfd);
++	}
++
++	return true;
++}
++
++void Cartridge::rememberSavedata() {
++	lastSavedRam_.assign(memptrs_.rambankdata(), memptrs_.rambankdataend());
++	lastSavedRtc_ = rtc_.baseTime();
+ }
+ 
+ void Cartridge::saveSavedata() {
+ 	std::string const &sbp = saveBasePath();
+ 
+ 	if (hasBattery(memptrs_.romdata()[0x147])) {
+-		std::ofstream file((sbp + ".sav").c_str(), std::ios::binary | std::ios::out);
+-		file.write(reinterpret_cast<char const *>(memptrs_.rambankdata()),
+-		           memptrs_.rambankdataend() - memptrs_.rambankdata());
++		writeFileAtomic(sbp + ".sav", memptrs_.rambankdata(),
++		                memptrs_.rambankdataend() - memptrs_.rambankdata());
+ 	}
+ 
+ 	if (hasRtc(memptrs_.romdata()[0x147])) {
+-		std::ofstream file((sbp + ".rtc").c_str(), std::ios::binary | std::ios::out);
+ 		unsigned long const basetime = rtc_.baseTime();
+-		file.put(basetime >> 24 & 0xFF);
+-		file.put(basetime >> 16 & 0xFF);
+-		file.put(basetime >>  8 & 0xFF);
+-		file.put(basetime       & 0xFF);
++		unsigned char const rtcdata[4] = {
++			static_cast<unsigned char>(basetime >> 24 & 0xFF),
++			static_cast<unsigned char>(basetime >> 16 & 0xFF),
++			static_cast<unsigned char>(basetime >>  8 & 0xFF),
++			static_cast<unsigned char>(basetime       & 0xFF)
++		};
++		writeFileAtomic(sbp + ".rtc", rtcdata, sizeof rtcdata);
+ 	}
++
++	rememberSavedata();
++}
++
++bool Cartridge::saveSavedataIfChanged() {
++	unsigned char const type = memptrs_.romdata()[0x147];
++	if (!hasBattery(type) && !hasRtc(type))
++		return false;
++
++	std::size_t const size = memptrs_.rambankdataend() - memptrs_.rambankdata();
++	bool const ramChanged = hasBattery(type) && size != 0
++		&& (lastSavedRam_.size() != size
++		    || std::memcmp(&lastSavedRam_[0], memptrs_.rambankdata(), size) != 0);
++	bool const rtcChanged = hasRtc(type) && lastSavedRtc_ != rtc_.baseTime();
++
++	if (!ramChanged && !rtcChanged)
++		return false;
++
++	saveSavedata();
++	return true;
+ }
+ 
+ static int asHex(char c) {
+diff --git a/libgambatte/src/mem/cartridge.h b/libgambatte/src/mem/cartridge.h
+index 0389629..2f3df20 100644
+--- a/libgambatte/src/mem/cartridge.h
++++ b/libgambatte/src/mem/cartridge.h
+@@ -63,6 +63,7 @@ public:
+ 	unsigned char rtcRead() const { return *rtc_.activeData(); }
+ 	void loadSavedata();
+ 	void saveSavedata();
++	bool saveSavedataIfChanged();
+ 	std::string const saveBasePath() const;
+ 	void setSaveDir(std::string const &dir);
+ 	LoadRes loadROM(std::string const &romfile, bool forceDmg, bool multicartCompat, int preferCGB);
+@@ -83,6 +84,10 @@ private:
+ 	std::string defaultSaveBasePath_;
+ 	std::string saveDir_;
+ 	std::vector<AddrData> ggUndoList_;
++	std::vector<unsigned char> lastSavedRam_;
++	unsigned long lastSavedRtc_;
++
++	void rememberSavedata();
+ 
+ 	void applyGameGenie(std::string const &code);
+ };
+diff --git a/libgambatte/src/memory.h b/libgambatte/src/memory.h
+index 5b7d8b5..09f0a69 100644
+--- a/libgambatte/src/memory.h
++++ b/libgambatte/src/memory.h
+@@ -44,6 +44,7 @@ public:
+ 	void loadState(SaveState const &state);
+ 	void loadSavedata() { cart_.loadSavedata(); }
+ 	void saveSavedata() { cart_.saveSavedata(); }
++	bool saveSavedataIfChanged() { return cart_.saveSavedataIfChanged(); }
+ 	std::string const saveBasePath() const { return cart_.saveBasePath(); }
+ 	void *rombank0_ptr() const { return cart_.romdata(0); }
+ 
+diff --git a/tests/autosave_test.cpp b/tests/autosave_test.cpp
+new file mode 100644
+index 0000000..8de7414
+--- /dev/null
++++ b/tests/autosave_test.cpp
+@@ -0,0 +1,74 @@
++// MeuPocketGB: checks the save-on-change logic of libgambatte on the PC.
++// Build/run with tests/run_autosave_test.sh (uses a ROM with battery SRAM).
++#include "mem/cartridge.h"
++#include <cstdio>
++#include <cstdlib>
++#include <string>
++#include <sys/stat.h>
++#include <unistd.h>
++
++using namespace gambatte;
++
++static int failures = 0;
++#define CHECK(cond) do { if (!(cond)) { std::printf("FALHOU: %s (linha %d)\n", #cond, __LINE__); ++failures; } \
++                         else std::printf("ok: %s\n", #cond); } while (0)
++
++static long fileSize(std::string const &p) {
++	struct stat st;
++	return stat(p.c_str(), &st) == 0 ? (long)st.st_size : -1;
++}
++
++static int byteAt(std::string const &p, long off) {
++	std::FILE *f = std::fopen(p.c_str(), "rb");
++	if (!f) return -1;
++	std::fseek(f, off, SEEK_SET);
++	int c = std::fgetc(f);
++	std::fclose(f);
++	return c;
++}
++
++static void loadCart(Cartridge &c, char const *rom, std::string const &dir) {
++	c.setSaveDir(dir);
++	LoadRes r = c.loadROM(rom, false, false, 0);
++	if (r != LOADRES_OK) { std::printf("nao abriu a ROM %s\n", rom); std::exit(2); }
++	c.loadSavedata();
++}
++
++int main(int argc, char **argv) {
++	if (argc < 3) { std::printf("uso: %s rom_com_bateria.gbc pasta_saves/\n", argv[0]); return 2; }
++	char const *rom = argv[1];
++	std::string dir = argv[2];
++	if (dir[dir.size() - 1] != '/') dir += '/';
++
++	Cartridge c;
++	loadCart(c, rom, dir);
++	std::string const sav = c.saveBasePath() + ".sav";
++	std::remove(sav.c_str());
++
++	CHECK(!c.saveSavedataIfChanged());              // nothing changed since load
++	CHECK(fileSize(sav) == -1);
++
++	c.mbcWrite(0x0000, 0x0A);                       // game enables cartridge RAM
++	unsigned char *sram = c.wsrambankptr();
++	sram[0xA000 + 5] = 0x42;                        // ... and saves something
++
++	CHECK(c.saveSavedataIfChanged());               // written
++	CHECK(fileSize(sav) > 0);
++	CHECK(byteAt(sav, 5) == 0x42);
++	CHECK(fileSize(sav + ".tmp") == -1);            // temp file renamed away
++	CHECK(!c.saveSavedataIfChanged());              // not written again
++
++	sram[0xA000 + 6] = 0x99;
++	CHECK(c.saveSavedataIfChanged());
++	CHECK(byteAt(sav, 6) == 0x99);
++
++	Cartridge c2;                                   // "power on again"
++	loadCart(c2, rom, dir);
++	c2.mbcWrite(0x0000, 0x0A);
++	CHECK(c2.wsrambankptr()[0xA000 + 5] == 0x42);
++	CHECK(c2.wsrambankptr()[0xA000 + 6] == 0x99);
++	CHECK(!c2.saveSavedataIfChanged());
++
++	std::printf(failures ? "\n%d teste(s) falharam\n" : "\nTodos os testes passaram\n", failures);
++	return failures ? 1 : 0;
++}
+diff --git a/tests/run_autosave_test.sh b/tests/run_autosave_test.sh
+new file mode 100755
+index 0000000..39c0ec7
+--- /dev/null
++++ b/tests/run_autosave_test.sh
+@@ -0,0 +1,11 @@
++#!/bin/sh
++# Compiles libgambatte for the PC and runs tests/autosave_test.cpp.
++# Usage: tests/run_autosave_test.sh path/to/rom_with_battery.gbc
++set -e
++cd "$(dirname "$0")/.."
++ROM="${1:?informe uma ROM com bateria, ex.: ucity.gbc}"
++OUT=$(mktemp -d)
++SRC=$(find libgambatte/src -name '*.cpp' ! -name 'file_zip.cpp' ! -path '*/unzip/*')
++${CXX:-g++} -std=gnu++11 -O1 -DHAVE_STDINT_H -Ilibgambatte/include -Ilibgambatte/src -Icommon \
++	tests/autosave_test.cpp $SRC -o "$OUT/autosave_test"
++"$OUT/autosave_test" "$ROM" "$OUT"

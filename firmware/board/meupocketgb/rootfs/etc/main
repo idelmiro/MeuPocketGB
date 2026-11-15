@@ -1,0 +1,136 @@
+#!/bin/busybox sh
+# MeuPocketGB /etc/main
+#
+# Trimmed version of the MiyooCFW /etc/main (https://github.com/MiyooCFW/buildroot,
+# GPL-2.0). Started by init (inittab: tty1::respawn:/etc/main).
+#
+# Kept: video/sound modules, firstboot (device detection + partition setup),
+#       filesystem check after an unclean power-off, hotkey daemon.
+# Removed: boot logo animation, GMenu2X, TV-out, USB gadget by default.
+# At the end it runs Gambatte, which opens straight into the game list.
+
+export HOME=/mnt
+export ROMS=/roms
+export BOOTDIR=/boot
+export SDL_NOMOUSE=1
+export OPTIONS_CFG="${BOOTDIR}/options.cfg"
+export CONSOLE_CFG="${BOOTDIR}/console.cfg"
+export GAMBATTE_ROMDIR="${ROMS}"
+export FRONTEND="meupocketgb"
+GAMBATTE=/usr/bin/gambatte-meupocketgb
+
+LOGS=/dev/null
+LOGS_TEMP=/dev/null
+UMTPR_LOGS=/dev/null
+GMENU2X_LOGS=/dev/null
+
+FRONTEND_ACTIVE=false
+test -f /tmp/frontend.active && FRONTEND_ACTIVE=true
+
+if grep -sq DEBUG\=\1 "${OPTIONS_CFG}" || test -r "${BOOTDIR}/firstboot" || test -r "${HOME}/firstboot.completed" || grep -sq FIRSTBOOT\=\1 "${OPTIONS_CFG}"; then
+	DEBUG_MSG="yes"
+	LOGS="${HOME}/log.txt"
+	LOGS_TEMP=$(mktemp)
+	echo -e "\e[0m"
+else
+	echo -e "\e[30m"   # black text: nothing printed on screen while booting
+fi
+export LOGS LOGS_TEMP UMTPR_LOGS GMENU2X_LOGS DEBUG_MSG
+
+restore_temp_log_func(){
+	cat ${LOGS_TEMP} >> ${LOGS}
+	LOGS_TEMP=$(mktemp)
+	export LOGS_TEMP
+}
+
+if ! $FRONTEND_ACTIVE; then
+	test -r "${HOME}/.date.conf" \
+	 && date "+%Y-%m-%d %H:%M" -s "$(cat ${HOME}/.date.conf)" >> "${LOGS}" 2>&1
+
+	# --- video (driver chosen by the kernel/u-boot for this screen) ---
+	video=$(cat /sys/kernel/miyoo_video/miyoo_video) \
+	 || echo "Couldn't read /sys/kernel/miyoo_video/miyoo_video" >> "${LOGS}"
+	if test -r "${BOOTDIR}/modules.custom.sh" && grep -sq MODULES_CUSTOM\=\1 "${OPTIONS_CFG}"; then
+		(cd "${BOOTDIR}" && sh modules.custom.sh) >> "${LOGS}" 2>&1
+	else
+		flip=$(grep -o FLIP=[0-1] "${OPTIONS_CFG}" | tr '[:upper:]' '[:lower:]')
+		invert=$(grep -o INVERT=[0-1] "${OPTIONS_CFG}" | tr '[:upper:]' '[:lower:]')
+		modprobe $video $flip $invert >> "${LOGS}" 2>&1
+	fi
+	echo "0" > ${HOME}/.tvmode 2>/dev/null
+	export TVOUT="OFF"
+	touch /tmp/tvout.disabled
+
+	# --- sound ---
+	cmdline=$(cat /proc/cmdline 2>/dev/null)
+	snd_val=$(echo "$cmdline" | sed -n 's/.*miyoo\.miyoo_snd=\([0-9]\+\).*/\1/p')
+	test -z "$snd_val" && snd_val=1
+	tvjack_val=$(echo "$cmdline" | sed -n 's/.*miyoo\.miyoo_tvjack=\([0-9]\+\).*/\1/p')
+	test -z "$tvjack_val" && tvjack_val=0
+	modprobe miyoo miyoo_snd="$snd_val" miyoo_tvjack="$tvjack_val" >> "${LOGS}" 2>&1
+
+	# --- first boot: device detection, partition resize, ROMS as FAT32 ---
+	if grep -sq FIRSTBOOT\=\1 "${OPTIONS_CFG}"; then
+		test -r "${BOOTDIR}/firstboot.done" && sh "${BOOTDIR}/firstboot.done"
+	fi
+	if test -r "${BOOTDIR}/firstboot"; then
+		sh "${BOOTDIR}/firstboot"
+	elif test -r "${HOME}/firstboot.completed"; then
+		rm "${HOME}/firstboot.completed"
+	fi
+
+	# --- repair filesystems only if the last power-off left them dirty ---
+	if ! grep -sq FS_CHECK\=\0 "${OPTIONS_CFG}"; then
+		if dmesg | grep -q "mmcblk0p1"; then
+			umount /dev/mmcblk0p1 >> "${LOGS}" 2>&1
+			fsck.vfat -y /dev/mmcblk0p1 >> "${LOGS}" 2>&1
+			mount /dev/mmcblk0p1 "${BOOTDIR}" -t vfat -o ro,exec,utf8 >> "${LOGS}" 2>&1
+		fi
+		if dmesg | grep -q "EXT4-fs (mmcblk0p5): warning: mounting fs with errors"; then
+			umount /dev/mmcblk0p5 >> "${LOGS}" 2>&1
+			e2fsck -y /dev/mmcblk0p5 >> "${LOGS}" 2>&1
+			mount /dev/mmcblk0p5 "${ROMS}" -o rw,noatime >> "${LOGS}" 2>&1
+		elif dmesg | grep -q "FAT-fs (mmcblk0p5): Volume was not properly unmounted"; then
+			umount /dev/mmcblk0p5 >> "${LOGS}" 2>&1
+			fsck.vfat -y /dev/mmcblk0p5 >> "${LOGS}" 2>&1
+			mount /dev/mmcblk0p5 "${ROMS}" -t vfat -o rw,utf8 >> "${LOGS}" 2>&1
+		fi
+	fi
+
+	if test "x${DEBUG_MSG}" == "xyes"; then
+		dmesg >> ${HOME}/dmesg.txt
+		restore_temp_log_func
+	fi
+
+	# --- hotkeys (volume/brightness) + optional custom script on BOOT ---
+	if test -r "${BOOTDIR}/normalboot.custom.sh"; then
+		(cd "${BOOTDIR}" && sh normalboot.custom.sh)
+	else
+		daemon >> "${LOGS}" 2>&1
+	fi
+fi
+
+if test -r "${CONSOLE_CFG}"; then
+	. "${CONSOLE_CFG}"
+else
+	CONSOLE_VARIANT="unknown"
+fi
+export CONSOLE_VARIANT
+
+# USB file transfer (MTP) only if USB_OTG=1 in options.cfg; off by default = faster boot
+if grep -sq USB_OTG\=\1 "${OPTIONS_CFG}"; then
+	test -r "${HOME}/.usbmode" && . ${HOME}/.usbmode || USB_MODE="mtp"
+	usb-mode ${USB_MODE} >> "${LOGS}" 2>&1
+	export USB_MODE
+fi
+
+clear
+cd "${HOME}"
+touch /tmp/frontend.active
+# Gambatte is the only program. If it ever closes ("Quit" in its menu),
+# write everything to the card and open it again.
+while true; do
+	"${GAMBATTE}" >> "${LOGS}" 2>&1
+	sync
+	sleep 1
+done

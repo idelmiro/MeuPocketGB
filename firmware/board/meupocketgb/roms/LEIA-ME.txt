@@ -1,0 +1,9 @@
+MeuPocketGB - pasta de jogos
+
+Copie aqui os seus jogos de Game Boy (.gb) e Game Boy Color (.gbc).
+Tambem funcionam arquivos .zip com uma ROM dentro.
+
+Pode colocar tudo direto nesta pasta ou dentro das subpastas GB e GBC:
+o MeuPocketGB mostra todos juntos numa lista so, em ordem alfabetica.
+
+Os jogos que ja vem aqui sao homebrew gratuitos, so para testar.
