@@ -24,7 +24,9 @@ e este projeto também é.
 | USB (MTP) no boot | Sim | Desligado (dá para religar no `options.cfg`) |
 | Save do jogo | Gravado ao sair do emulador | Gravado ~2 s depois que o jogo salva |
 | Ao ligar | Menu | Continua o último jogo de onde parou (SELECT segurado = lista) |
-| Tela de boot | Logo do Miyoo + animação | Nome do console em arte ASCII + barra de progresso |
+| Tela de boot | Logo do Miyoo + animação | Nome do console + barra de progresso, no mesmo visual dos menus |
+| Menus | GMenu2X / menus do Gambatte em 160x144 | Minimalistas em 320x240, em português (inspirados no MinUI) |
+| Brilho no boot | Cai para 50% e volta depois | Constante (o nível salvo é aplicado logo no início) |
 | Ombros L e R no jogo | L = avanço rápido (sem som), R = menu | Sem função (o menu fica no botão de atalho) |
 
 O último item importa porque a chave ON/OFF do PocketGo corta a energia na hora.
@@ -103,6 +105,24 @@ O `linux-fusion` guarda uma cópia dos módulos do kernel e, sem o `dirclean`, a
 sai com os módulos antigos. Sempre use `MINIMAL=yes`: sem ele a imagem fica com 3 GB e
 o `main.img` grande continua lá (apague `output/images/main.img` para voltar ao normal).
 
+## Menus
+
+Fundo preto, texto branco, o item escolhido numa pílula branca e as dicas de botões
+no rodapé. O visual é inspirado no [MinUI](https://github.com/shauninman/MinUI), mas o
+código é próprio e a fonte é a Nunito (SIL OFL 1.1, em `emulador/ui/`).
+
+- **Lista de jogos:** nomes sem extensão nem "(USA, Europe)". Em *Opções > Lista de jogos*
+  dá para trocar *Tudo junto* (padrão) por *Por pasta* (GB = "Game Boy", GBC = "Game Boy Color").
+- **Menu do jogo** (botão de atalho): Continuar, Salvar, Carregar, Opções, Sair. Em Salvar e
+  Carregar, esquerda/direita escolhe o slot e aparece a miniatura do estado salvo.
+- **Opções:** o valor muda com esquerda/direita e vale na hora; fica salvo ao sair.
+  Reiniciar jogo e Códigos (Game Genie / GameShark) ficam aqui.
+
+Para testar os menus no PC sem o console, compile com `EXTRA_DEFINES=-DMPGB_TEST`:
+`MPGB_TECLAS="ESPERA:120,MENU,BAIXO,A"` aperta botões e `MPGB_CAPTURAS=/pasta` salva cada
+tela como BMP. A fonte embutida sai de `emulador/ui/gerar-fonte.py` e a tela de boot de
+`firmware/board/meupocketgb/boot/gerar-tela-boot.py` (precisam do Pillow).
+
 ## Continuar o jogo
 
 Ao ligar, o console abre o último jogo já no ponto em que você estava. Enquanto você
@@ -130,7 +150,8 @@ arquivo à parte: os slots de save state 0 a 9 do menu não são tocados.
 
 ```
 emulador/patches/   mudanças no Gambatte-DMS (lista única de ROMs, save automático,
-                    marcas de tempo, continuar o jogo, L/R sem função)
+                    marcas de tempo, continuar o jogo, L/R sem função, menus, lista por pasta)
+emulador/ui/        fonte Nunito (OFL) e o gerador da fonte embutida nos menus
 cartao/             arquivos do modo rápido (vão para a partição BOOT)
 firmware/           árvore externa do Buildroot (BR2_EXTERNAL)
   configs/meupocketgb.fragment     o que entra e o que sai da imagem

@@ -1,0 +1,2733 @@
+MeuPocketGB: menus minimalistas desenhados direto na tela 320x240
+
+Visual inspirado no MinUI (codigo proprio, fonte Nunito sob SIL OFL 1.1
+embutida em gambatte_sdl/mpgb_fonte.h, gerada por emulador/ui/gerar-fonte.py):
+fundo preto, texto branco, item selecionado numa pilula branca, dicas de
+botoes no rodape e bateria no canto. Tudo em portugues.
+
+- Lista de jogos: nomes sem extensao nem "(USA, Europe)", contador, aviso
+  de erro no rodape (a lista reabre mostrando o erro tambem quando aberta
+  pelo menu).
+- Menu do jogo sobre o jogo escurecido: Continuar, Salvar, Carregar,
+  Opcoes, Sair. Em Salvar/Carregar, esquerda/direita escolhe o slot e a
+  previa mostra a miniatura.
+- Opcoes: valor ao lado, trocado com esquerda/direita e aplicado na hora,
+  com uma linha de ajuda; salvas como padrao ao sair. Reiniciar jogo e
+  Codigos ficam aqui.
+- Sem as animacoes de deslizar do menu de 160x144.
+- Testes no PC: compilado com -DMPGB_TEST, MPGB_TECLAS injeta botoes e
+  MPGB_CAPTURAS salva cada tela (nunca entra no firmware).
+
+diff --git a/Makefile.meupocketgb b/Makefile.meupocketgb
+index 83ac10f..9e2fe90 100644
+--- a/Makefile.meupocketgb
++++ b/Makefile.meupocketgb
+@@ -33,3 +33,7 @@ ifneq ($(STATIC),1)
+ # inside the binary: resolving libstdc++.so symbols took ~0.4 s at every start.
+ LDFLAGS = -lSDL -lSDL_image -lSDL_mixer -lz -lm -pthread -Wl,-Bstatic -lstdc++ -Wl,-Bdynamic -static-libgcc -Wl,--as-needed -Wl,--gc-sections $(EXTRA_LDFLAGS)
+ endif
++
++# MeuPocketGB menus (mpgb_ui.cpp: drawing, embedded Nunito font)
++OBJS += gambatte_sdl/mpgb_ui.o
++executable: gambatte_sdl/mpgb_ui.o
+diff --git a/gambatte_sdl/libmenu.cpp b/gambatte_sdl/libmenu.cpp
+index ea1e9a0..d53bcbc 100644
+--- a/gambatte_sdl/libmenu.cpp
++++ b/gambatte_sdl/libmenu.cpp
+@@ -14,6 +14,9 @@
+ #include <math.h>
+ 
+ #include "libmenu.h"
++#ifdef MEUPOCKETGB
++#include "mpgb_ui.h"
++#endif
+ #include "SFont.h"
+ #include "menu.h"
+ #include "scaler.h"
+@@ -148,7 +151,7 @@ void checkBatt(){
+ 
+ 			if (battery_level < 3300) {
+ 				lowbattery = true;
+-				printOverlay("Low Battery!"); //low battery warning
++				printOverlay("Bateria fraca!"); //low battery warning
+ 				/*if (battery_level < 3000) {
+ 				    printf("emergency shutdown!\n");
+ 				    gambatte_p->saveSavedata();
+@@ -451,13 +454,13 @@ int textanim_reset(){
+ 
+ void stateload_dms(int saveslot) {
+     gambatte_p->selectState_NoOsd(saveslot);
+-    char overlaytext[20];
++    char overlaytext[32];
+     if(gambatte_p->loadState_NoOsd()){
+         can_reset = 1;//allow user to reset or save state once a savestate is loaded
+-        sprintf(overlaytext, "State %d loaded", gambatte_p->currentState());
++        sprintf(overlaytext, "Estado %d carregado", gambatte_p->currentState());
+         printOverlay(overlaytext);//print overlay text
+     } else {
+-        sprintf(overlaytext, "State %d empty", gambatte_p->currentState());
++        sprintf(overlaytext, "Estado %d vazio", gambatte_p->currentState());
+         printOverlay(overlaytext);//print overlay text
+     }
+ }
+@@ -495,11 +498,11 @@ void statesave_dms(int saveslot) {
+             loadFilter(filtername); //restore color filter
+         }
+ 
+-        char overlaytext[14];
+-        sprintf(overlaytext, "State %d saved", gambatte_p->currentState());
++        char overlaytext[32];
++        sprintf(overlaytext, "Estado %d salvo", gambatte_p->currentState());
+         printOverlay(overlaytext);//print overlay text
+     } else if (can_reset == 0){//boot logo is still running, can't save state
+-        printOverlay("Unable to save");//print overlay text
++        printOverlay("Aguarde o logo");//print overlay text
+     }
+ }
+ 
+@@ -528,6 +531,9 @@ int menu_main(menu_t *menu) {
+ 		checkBatt();
+ #endif
+         dirty = 0;
++#ifdef MPGB_TEST
++		mpgb_test_feed_keys();
++#endif
+ 		while (SDL_PollEvent(&event)) {
+ 			switch (event.type) {
+ 				case SDL_QUIT:
+@@ -579,6 +585,11 @@ int menu_main(menu_t *menu) {
+ 									menu->entries[menu->selected_entry]->selected_entry = menu->entries[menu->selected_entry]->n_entries - 1;
+ 									dirty = 1;
+ 								}
++#ifdef MEUPOCKETGB
++								playMenuSound_move();
++								if (menu->entries[menu->selected_entry]->mpgb_on_shift)
++									menu->entries[menu->selected_entry]->mpgb_on_shift(menu);
++#endif
+ 							} else if (menu->n_entries >= 26){ // Enable page scrolling if too many menu items
+ 								if(num_selectable > 0){
+ 									playMenuSound_move();
+@@ -608,6 +619,11 @@ int menu_main(menu_t *menu) {
+ 									menu->entries[menu->selected_entry]->selected_entry = 0;
+ 									dirty = 1;
+ 								}
++#ifdef MEUPOCKETGB
++								playMenuSound_move();
++								if (menu->entries[menu->selected_entry]->mpgb_on_shift)
++									menu->entries[menu->selected_entry]->mpgb_on_shift(menu);
++#endif
+ 							} else if (menu->n_entries >= 26){ // Enable page scrolling if too many menu items
+ 								if(num_selectable > 0){
+ 									playMenuSound_move();
+@@ -745,6 +761,9 @@ int menu_cheat(menu_t *menu) {
+ 		checkBatt();
+ #endif
+         dirty = 0;
++#ifdef MPGB_TEST
++		mpgb_test_feed_keys();
++#endif
+ 		while (SDL_PollEvent(&event)) {
+ 			switch (event.type) {
+ 				case SDL_QUIT:
+@@ -1273,6 +1292,8 @@ menu_t *new_menu() {
+ 	menu->selected_entry = 0;
+ 	menu->quit = 0;
+ 	menu->back_callback = NULL;
++	menu->mpgb_kind = 0;
++	menu->mpgb_top = 0;
+ 	return menu;
+ }
+ 
+@@ -1320,6 +1341,9 @@ menu_entry_t *new_menu_entry(int is_shiftable) {
+ 	entry->n_entries = 0;
+ 	entry->selected_entry = 0;
+     entry->callback = NULL;
++	entry->mpgb_help = NULL;
++	entry->mpgb_slot = 0;
++	entry->mpgb_on_shift = NULL;
+ 	return entry;
+ }
+ 
+@@ -1944,6 +1968,21 @@ static void invert_rect(SDL_Surface* surface, SDL_Rect *rect) {
+ 	}
+ }
+ 
++#ifdef MEUPOCKETGB
++static void redraw(menu_t *menu) {
++	if(forcemenuexit == 0){
++		mpgb_ui_draw(screen, menu);
++#ifdef MPGB_TEST
++		mpgb_test_capture(screen);
++#endif
++		SDL_Flip(screen);
++	}
++}
++
++static void redraw_blank(menu_t *menu) {
++	redraw(menu);
++}
++#else
+ static void redraw(menu_t *menu) {
+ 	if(forcemenuexit == 0){
+ 		clear_surface(menuscreen, 0xFFFFFF);
+@@ -1994,6 +2033,8 @@ static void redraw_blank(menu_t *menu) {
+ 	}	
+ }
+ 
++#endif // MEUPOCKETGB
++
+ static void redraw_cheat(menu_t *menu) {
+ 	if(forcemenuexit == 0){
+ 		clear_surface(menuscreen, 0xFFFFFF);
+diff --git a/gambatte_sdl/libmenu.h b/gambatte_sdl/libmenu.h
+index ec07b3d..9c1f570 100644
+--- a/gambatte_sdl/libmenu.h
++++ b/gambatte_sdl/libmenu.h
+@@ -102,6 +102,10 @@ typedef struct {
+ 	int n_entries;
+ 	int selected_entry;
+ 	void (*callback)(menu_t *);
++	/* MeuPocketGB (mpgb_ui): help line, save-slot picker, action on left/right */
++	const char *mpgb_help;
++	int mpgb_slot;
++	void (*mpgb_on_shift)(menu_t *);
+ } menu_entry_t;
+ 
+ struct Menu_t {
+@@ -113,6 +117,9 @@ struct Menu_t {
+ 	int i;
+ 	int quit;
+ 	void (*back_callback)(menu_t *);
++	/* MeuPocketGB (mpgb_ui): which screen layout, first visible row */
++	int mpgb_kind;
++	int mpgb_top;
+ };
+ 
+ extern SDL_Surface *menuscreen;
+diff --git a/gambatte_sdl/menu.cpp b/gambatte_sdl/menu.cpp
+index 43776b2..a51075e 100644
+--- a/gambatte_sdl/menu.cpp
++++ b/gambatte_sdl/menu.cpp
+@@ -24,6 +24,7 @@
+ #include <fcntl.h>
+ #include <sys/ioctl.h>
+ #include <linux/input.h>
++#include "mpgb_ui.h"
+ #include <vector>
+ #include <algorithm>
+ #endif
+@@ -102,6 +103,9 @@ int init_menu() {
+ void menu_set_screen(SDL_Surface *set_screen) {
+ 	screen = set_screen;
+ 	libmenu_set_screen(screen);
++#ifdef MEUPOCKETGB
++	mpgb_ui_set_screen(screen);
++#endif
+ }
+ 
+ void show_fps(SDL_Surface *surface, int fps) {
+@@ -217,6 +221,10 @@ std::string menu_main_title = ("GAMBATTE-DMS");
+ #endif
+ 
+ void main_menu_with_anim() {//create a single menu frame to make the entry animation
++#ifdef MEUPOCKETGB
++    menuin = -2; // no slide-in: the run loop opens the menu on the next frame
++    return;
++#endif
+ 
+     menu_t *menu;
+     menu_entry_t *menu_entry;
+@@ -273,7 +281,15 @@ void main_menu_with_anim() {//create a single menu frame to make the entry anima
+     delete_menu(menu);
+ }
+ 
++#ifdef MEUPOCKETGB
++static void mpgb_main_menu();
++#endif
++
+ void main_menu() {
++#ifdef MEUPOCKETGB
++    mpgb_main_menu(); // Continuar / Salvar / Carregar / Opções / Sair
++    return;
++#endif
+ 
+     //switchToMenuAudio();
+ 
+@@ -387,9 +403,9 @@ static void callback_restart(menu_t *caller_menu) {
+     SDL_Delay(250);
+     if(can_reset == 1){//boot logo already ended, can reset game safely
+         gambatte_p->reset();
+-        printOverlay("Reset ok");//print overlay text
++        printOverlay("Jogo reiniciado");//print overlay text
+     } else if (can_reset == 0){//boot logo is still running, can't reset game safely
+-        printOverlay("Unable to reset");//print overlay text
++        printOverlay("Aguarde o logo");//print overlay text
+     }
+     menuout = 0;
+     caller_menu->quit = 1;
+@@ -852,6 +868,8 @@ static bool mpgb_open_rom(const std::string &fullgamepath, bool resume) {
+     return true;
+ }
+ 
++static bool mpgb_list_reopen = false;
++
+ static void mpgb_callback_selected(menu_t *caller_menu) {
+     int idx = caller_menu->selected_entry;
+     if (idx < 0 || idx >= (int)mpgb_roms.size())
+@@ -867,12 +885,17 @@ static void mpgb_callback_selected(menu_t *caller_menu) {
+     }
+     if (mpgb_open_rom(mpgb_roms[idx], false))
+         forcemenuexit = 2;
+-    caller_menu->quit = 1; // on error the list reopens showing it as its title
++    else
++        mpgb_list_reopen = true; // show the list again with the error as its title
++    caller_menu->quit = 1;
+ }
+ 
+ static int mpgb_last_selected = 0;
+ 
+ static void mpgb_show_rom_list(menu_t *caller_menu) {
++  bool first = true;
++  do {
++    mpgb_list_reopen = false;
+     menu_t *menu;
+     menu_entry_t *menu_entry;
+ 
+@@ -880,11 +903,14 @@ static void mpgb_show_rom_list(menu_t *caller_menu) {
+     std::string romdir = mpgb_romdir();
+     mpgb_scan(romdir, 1);
+     std::sort(mpgb_roms.begin(), mpgb_roms.end(), mpgb_less);
+-    for (std::size_t i = 0; i < mpgb_roms.size(); ++i)
+-        if (mpgb_roms[i] == mpgb_current_rom)
+-            mpgb_last_selected = (int)i;
++    if (first) // start on the game running now; after an error stay on the failed one
++        for (std::size_t i = 0; i < mpgb_roms.size(); ++i)
++            if (mpgb_roms[i] == mpgb_current_rom)
++                mpgb_last_selected = (int)i;
++    first = false;
+ 
+     menu = new_menu();
++    menu->mpgb_kind = MPGB_KIND_ROMS;
+     menu_set_header(menu, menu_main_title.c_str());
+     menu_set_title(menu, mpgb_last_error.empty() ? "Jogos" : mpgb_last_error.c_str());
+     menu->back_callback = callback_back;
+@@ -902,7 +928,7 @@ static void mpgb_show_rom_list(menu_t *caller_menu) {
+     } else {
+         for (std::size_t i = 0; i < mpgb_roms.size(); ++i) {
+             menu_entry = new_menu_entry(0);
+-            menu_entry_set_text_no_ext(menu_entry, mpgb_basename(mpgb_roms[i]).c_str());
++            menu_entry_set_text(menu_entry, mpgb_display_name(mpgb_roms[i]).c_str());
+             menu_add_entry(menu, menu_entry);
+             menu_entry->callback = mpgb_callback_selected;
+         }
+@@ -914,6 +940,7 @@ static void mpgb_show_rom_list(menu_t *caller_menu) {
+     if (!mpgb_roms.empty())
+         mpgb_last_selected = menu->selected_entry;
+     delete_menu(menu);
++  } while (mpgb_list_reopen);
+ 
+     if (forcemenuexit > 0 && caller_menu) {
+         menuout = 0;
+@@ -924,6 +951,299 @@ static void mpgb_show_rom_list(menu_t *caller_menu) {
+ /* Called once at startup instead of main_menu(): shows the game list and
+  * keeps showing it until a game is loaded (B just refreshes the list, so
+  * newly copied ROMs show up without rebooting). */
++/* ==================== MEUPOCKETGB: IN-GAME MENU AND OPTIONS (mpgb_ui) ====================
++ * In-game menu: Continuar / Salvar / Carregar / Opções / Sair, drawn over the
++ * paused game. On Salvar/Carregar, left/right picks the state slot and the
++ * preview shows it. Opções: every setting is one line, its value changed with
++ * left/right and applied at once; saved as default when leaving.
++ */
++static void callback_return(menu_t *caller_menu);
++static void callback_restart(menu_t *caller_menu);
++static void callback_cheats(menu_t *caller_menu);
++static void callback_loadgame(menu_t *caller_menu);
++
++static int mpgb_slot_now = 0;
++static bool mpgb_back_to_game = false; // an option (restart) asked to close every menu
++
++static void mpgb_cb_sync_slot(menu_t *menu) { // Salvar and Carregar share the slot
++    mpgb_slot_now = menu->entries[menu->selected_entry]->selected_entry;
++    for (int i = 0; i < menu->n_entries; ++i)
++        if (menu->entries[i]->mpgb_slot)
++            menu->entries[i]->selected_entry = mpgb_slot_now;
++}
++
++static void mpgb_cb_save(menu_t *menu) {
++    mpgb_slot_now = menu->entries[menu->selected_entry]->selected_entry;
++    playMenuSound_ok();
++    statesave_dms(mpgb_slot_now);
++    callback_return(menu);
++}
++
++static void mpgb_cb_load(menu_t *menu) {
++    mpgb_slot_now = menu->entries[menu->selected_entry]->selected_entry;
++    playMenuSound_ok();
++    stateload_dms(mpgb_slot_now);
++    callback_return(menu);
++}
++
++static void mpgb_cb_quit(menu_t *menu) {
++    mpgb_save_resume_state(); // the game continues from here if picked again
++    callback_loadgame(menu);
++}
++
++/* ---- options ---- */
++
++struct MpgbOption {
++    std::vector<std::string> values; // internal values (what the settings store)
++    void (*apply)(const std::string &value, int index);
++};
++static std::vector<MpgbOption> mpgb_opts; // same order as the options menu entries
++
++static void mpgb_apply_scaler(const std::string &v, int) {
++    selectedscaler = v;
++    if (gameiscgb == 0) {
++        loadPalette(palname);
++        load_border(dmgbordername);
++    } else {
++        load_border(gbcbordername);
++    }
++    blitter_p->setScreenRes();
++}
++static void mpgb_apply_palette(const std::string &v, int) {
++    palname = v;
++    loadPalette(palname);
++    if (gameiscgb == 0)
++        load_border(dmgbordername);
++}
++static void mpgb_apply_filter(const std::string &v, int) { filtername = v; loadFilter(filtername); }
++static void mpgb_apply_dmgborder(const std::string &v, int) {
++    dmgbordername = v;
++    if (gameiscgb == 0)
++        load_border(dmgbordername);
++}
++static void mpgb_apply_gbcborder(const std::string &v, int) {
++    gbcbordername = v;
++    if (gameiscgb == 1)
++        load_border(gbcbordername);
++}
++static void mpgb_apply_system(const std::string &, int i) { prefercgb = i; }
++static void mpgb_apply_ghosting(const std::string &, int i) { ghosting = i; }
++static void mpgb_apply_bios(const std::string &, int i) { biosenabled = i; }
++static void mpgb_apply_sound(const std::string &, int i) { stereosound = i; }
++static void mpgb_apply_buttons(const std::string &, int i) { buttonlayout = i; refreshkeys = 1; }
++static void mpgb_apply_fps(const std::string &, int i) { showfps = i; }
++
++static void mpgb_cb_option_shift(menu_t *menu) {
++    int i = menu->selected_entry;
++    if (i < 0 || i >= (int)mpgb_opts.size() || !mpgb_opts[i].apply)
++        return;
++    menu_entry_t *e = menu->entries[i];
++    mpgb_opts[i].apply(mpgb_opts[i].values[e->selected_entry], e->selected_entry);
++}
++
++// files of a settings folder, e.g. ~/.gambatte/palettes/*.pal
++static std::vector<std::string> mpgb_list_files(const char *sub, int (*filter)(const struct dirent *)) {
++    std::vector<std::string> out;
++    std::string dir = homedir + "/.gambatte/" + sub;
++    struct dirent **list = NULL;
++    int n = scandir(dir.c_str(), &list, filter, alphasort);
++    for (int i = 0; i < n; ++i) {
++        out.push_back(list[i]->d_name);
++        free(list[i]);
++    }
++    if (n >= 0)
++        free(list);
++    return out;
++}
++
++static void mpgb_add_option(menu_t *menu, const char *label, const char *help,
++                            const std::vector<std::string> &shown, const std::vector<std::string> &values,
++                            const std::string &current, void (*apply)(const std::string &, int)) {
++    menu_entry_t *e = new_menu_entry(1);
++    menu_entry_set_text(e, label);
++    for (size_t i = 0; i < shown.size(); ++i)
++        menu_entry_add_entry(e, shown[i].c_str());
++    e->selected_entry = 0;
++    for (size_t i = 0; i < values.size(); ++i)
++        if (values[i] == current)
++            e->selected_entry = (int)i;
++    e->mpgb_help = help;
++    e->mpgb_on_shift = mpgb_cb_option_shift;
++    menu_add_entry(menu, e);
++    MpgbOption o = { values, apply };
++    mpgb_opts.push_back(o);
++}
++
++static void mpgb_add_choice(menu_t *menu, const char *label, const char *help, const char *const *shown,
++                            int n, int current, void (*apply)(const std::string &, int)) {
++    std::vector<std::string> s, v;
++    for (int i = 0; i < n; ++i) {
++        s.push_back(shown[i]);
++        char num[8];
++        snprintf(num, sizeof num, "%d", i);
++        v.push_back(num);
++    }
++    char cur[8];
++    snprintf(cur, sizeof cur, "%d", current);
++    mpgb_add_option(menu, label, help, s, v, cur, apply);
++}
++
++static void mpgb_add_action(menu_t *menu, const char *label, const char *help, void (*callback)(menu_t *)) {
++    menu_entry_t *e = new_menu_entry(0);
++    menu_entry_set_text(e, label);
++    e->mpgb_help = help;
++    e->callback = callback;
++    menu_add_entry(menu, e);
++    MpgbOption o = { std::vector<std::string>(), NULL };
++    mpgb_opts.push_back(o);
++}
++
++static void mpgb_cb_restart(menu_t *menu) {
++    callback_restart(menu);
++    mpgb_back_to_game = true;
++}
++
++static void mpgb_cb_options_back(menu_t *menu) {
++    saveConfig(0); // keep the choices for the next games and power-ons
++    playMenuSound_back();
++    menu->quit = 1;
++}
++
++static void mpgb_cb_options(menu_t *caller_menu) {
++    menu_t *menu = new_menu();
++    menu->mpgb_kind = MPGB_KIND_OPTIONS;
++    menu_set_title(menu, "Opções");
++    menu->back_callback = mpgb_cb_options_back;
++    mpgb_opts.clear();
++
++    {   // screen size (the IPU modes are for other consoles)
++        const char *shown[] = { "Original", "1,5x rápida", "1,5x suave", "Proporção rápida",
++                                "Proporção suave", "Tela cheia rápida", "Tela cheia suave" };
++        const char *vals[] = { "No Scaling", "1.5x Fast", "1.5x Smooth", "Aspect 1.66x Fast",
++                               "Aspect 1.66x Smooth", "FullScreen Fast", "FullScreen Smooth" };
++        mpgb_add_option(menu, "Tela", "Tamanho da imagem do jogo na tela.",
++                        std::vector<std::string>(shown, shown + 7), std::vector<std::string>(vals, vals + 7),
++                        selectedscaler, mpgb_apply_scaler);
++    }
++    {
++        std::vector<std::string> s, v, files = mpgb_list_files("palettes", parse_ext_pal);
++        s.push_back("Sem paleta"); v.push_back("NONE");
++        s.push_back("Padrão"); v.push_back("DEFAULT");
++        s.push_back("Automática"); v.push_back("AUTO");
++        for (size_t i = 0; i < files.size(); ++i) { s.push_back(strip_Extension(files[i])); v.push_back(files[i]); }
++        mpgb_add_option(menu, "Paleta (GB)", "Cores dos jogos de Game Boy.", s, v, palname, mpgb_apply_palette);
++    }
++    {
++        std::vector<std::string> s, v, files = mpgb_list_files("filters", parse_ext_fil);
++        s.push_back("Sem filtro"); v.push_back("NONE");
++        s.push_back("Padrão"); v.push_back("DEFAULT");
++        for (size_t i = 0; i < files.size(); ++i) { s.push_back(strip_Extension(files[i])); v.push_back(files[i]); }
++        mpgb_add_option(menu, "Filtro de cor (GBC)", "Ajuste das cores dos jogos de Game Boy Color.", s, v,
++                        filtername, mpgb_apply_filter);
++    }
++    {
++        std::vector<std::string> s, v, files = mpgb_list_files("borders", parse_ext_png);
++        s.push_back("Nenhuma"); v.push_back("NONE");
++        s.push_back("Padrão"); v.push_back("DEFAULT");
++        s.push_back("Automática"); v.push_back("AUTO");
++        for (size_t i = 0; i < files.size(); ++i) { s.push_back(strip_Extension(files[i])); v.push_back(files[i]); }
++        mpgb_add_option(menu, "Moldura (GB)", "Imagem em volta dos jogos de Game Boy.", s, v, dmgbordername,
++                        mpgb_apply_dmgborder);
++        mpgb_add_option(menu, "Moldura (GBC)", "Imagem em volta dos jogos de Game Boy Color.", s, v, gbcbordername,
++                        mpgb_apply_gbcborder);
++    }
++    {
++        const char *s[] = { "Game Boy", "Game Boy Color" };
++        mpgb_add_choice(menu, "Sistema preferido", "Para cartuchos que rodam nos dois. Vale no próximo jogo.",
++                        s, 2, prefercgb, mpgb_apply_system);
++    }
++    {
++        const char *s[] = { "Desligado", "Só GB", "Só GBC", "Sempre" };
++        mpgb_add_choice(menu, "Rastro de imagem", "Imita o rastro da tela original do Game Boy.",
++                        s, 4, ghosting, mpgb_apply_ghosting);
++    }
++    {
++        const char *s[] = { "Desligado", "Ligado" };
++        mpgb_add_choice(menu, "Logo do Game Boy", "Mostra a animação do logo ao abrir um jogo.",
++                        s, 2, biosenabled, mpgb_apply_bios);
++    }
++    {
++        const char *s[] = { "Mono", "Estéreo" };
++        mpgb_add_choice(menu, "Som", "Saída de som do emulador.", s, 2, stereosound, mpgb_apply_sound);
++    }
++    {
++        const char *s[] = { "Padrão", "Alternativo", "Alternativo 2" };
++        mpgb_add_choice(menu, "Botões", "Posição dos botões A e B no jogo.", s, 3, buttonlayout, mpgb_apply_buttons);
++    }
++    {
++        const char *s[] = { "Desligado", "Ligado" };
++        mpgb_add_choice(menu, "Mostrar FPS", "Quadros por segundo no canto da tela.", s, 2, showfps, mpgb_apply_fps);
++    }
++    mpgb_add_action(menu, "Reiniciar jogo", "Volta o jogo para o começo (o save do jogo fica).", mpgb_cb_restart);
++    mpgb_add_action(menu, "Códigos", "Game Genie e GameShark.", callback_cheats);
++
++    playMenuSound_in();
++    menu_main(menu);
++    delete_menu(menu);
++    mpgb_opts.clear();
++    if (mpgb_back_to_game || forcemenuexit > 0) {
++        menuout = 0;
++        caller_menu->quit = 1;
++    }
++}
++
++static void mpgb_main_menu() {
++    SDL_EnableKeyRepeat(250, 83);
++    forcemenuexit = 0;
++    mpgb_back_to_game = false;
++    mpgb_ui_capture_game();
++
++    menu_t *menu = new_menu();
++    menu->mpgb_kind = MPGB_KIND_GAME;
++    std::string title = mpgb_display_name(gamename);
++    menu_set_title(menu, title.c_str());
++    menu->back_callback = callback_return;
++
++    menu_entry_t *e = new_menu_entry(0);
++    menu_entry_set_text(e, "Continuar");
++    e->callback = callback_return;
++    menu_add_entry(menu, e);
++
++    const char *names[] = { "Salvar", "Carregar" };
++    void (*actions[])(menu_t *) = { mpgb_cb_save, mpgb_cb_load };
++    for (int k = 0; k < 2; ++k) {
++        e = new_menu_entry(1);
++        menu_entry_set_text(e, names[k]);
++        for (int i = 0; i < 10; ++i) {
++            char num[4];
++            snprintf(num, sizeof num, "%d", i);
++            menu_entry_add_entry(e, num);
++        }
++        e->selected_entry = mpgb_slot_now;
++        e->mpgb_slot = 1;
++        e->mpgb_on_shift = mpgb_cb_sync_slot;
++        e->callback = actions[k];
++        menu_add_entry(menu, e);
++    }
++
++    e = new_menu_entry(0);
++    menu_entry_set_text(e, "Opções");
++    e->callback = mpgb_cb_options;
++    menu_add_entry(menu, e);
++
++    e = new_menu_entry(0);
++    menu_entry_set_text(e, "Sair");
++    e->callback = mpgb_cb_quit;
++    menu_add_entry(menu, e);
++
++    switchToMenuAudio();
++    menu_main(menu);
++    switchToEmulatorAudio();
++    delete_menu(menu);
++    SDL_EnableKeyRepeat(0, 100);
++    mpgb_ui_restore_game_screen(); // no menu pixels left around the game
++}
++
+ void rom_browser_startup() {
+     SDL_EnableKeyRepeat(250, 83);
+     switchToMenuAudio();
+@@ -2593,7 +2913,7 @@ static void callback_cheats(menu_t *caller_menu) {
+     menu = new_menu();
+         
+     menu_set_header(menu, menu_main_title.c_str());
+-    menu_set_title(menu, "Cheat Codes");
++    menu_set_title(menu, "Códigos");
+     menu->back_callback = callback_back;
+ 
+     menu_entry = new_menu_entry(0);
+diff --git a/gambatte_sdl/mpgb_fonte.h b/gambatte_sdl/mpgb_fonte.h
+new file mode 100644
+index 0000000..23deed7
+--- /dev/null
++++ b/gambatte_sdl/mpgb_fonte.h
+@@ -0,0 +1,1447 @@
++/* Generated by emulador/ui/gerar-fonte.py from Nunito (SIL OFL 1.1). Do not edit. */
++#ifndef MPGB_FONTE_H
++#define MPGB_FONTE_H
++#include <stdint.h>
++
++struct mpgb_glyph { uint16_t cp; int8_t x, y; uint8_t w, h, adv; uint32_t off; };
++struct mpgb_font { const mpgb_glyph *g; int n; const uint8_t *px; int ascent, descent; };
++
++static const uint8_t mpgb_px_item[22760] = {
++0,66,64,0,25,254,253,19,28,255,255,19,7,255,253,2,0,244,235,0,0,223,214,0,0,203,194,0,0,183,174,0,
++0,94,90,0,0,37,38,0,27,251,250,25,17,232,232,15,0,4,4,0,0,64,49,0,36,77,0,17,253,237,0,199,
++255,53,8,255,232,0,192,255,48,0,237,207,0,165,255,23,0,206,178,0,134,248,2,0,59,47,0,27,79,0,0,0,
++0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
++0,0,0,0,0,0,0,0,0,0,0,30,54,0,1,79,3,0,0,0,0,169,176,0,64,255,24,0,0,0,0,225,
++133,0,118,236,0,0,0,143,171,255,202,168,220,247,136,0,0,139,196,255,168,160,247,216,122,0,0,0,112,242,1,13,
++254,87,0,0,0,0,163,193,0,63,255,37,0,0,0,5,218,147,8,116,246,9,0,0,68,253,255,255,255,255,255,255,
++133,0,7,111,255,94,64,223,181,63,16,0,0,104,247,4,7,250,98,0,0,0,0,132,189,0,31,252,36,0,0,0,
++0,4,7,0,0,11,0,0,0,0,0,0,0,0,22,16,0,0,0,0,0,0,0,0,201,179,0,0,0,0,0,0,
++0,40,234,220,40,0,0,0,0,29,193,255,255,255,255,203,54,0,0,202,255,198,107,109,155,241,157,0,39,255,233,7,
++0,0,0,8,5,0,41,255,232,11,0,0,0,0,0,0,3,211,255,228,149,90,24,0,0,0,0,28,175,250,255,255,
++253,179,26,0,0,0,0,16,73,130,225,255,192,0,0,0,0,0,0,0,25,254,254,8,14,103,21,0,0,0,46,255,
++242,1,73,255,249,194,165,177,243,255,125,0,0,94,195,242,255,255,214,102,0,0,0,0,0,0,222,198,0,0,0,0,
++0,0,0,0,162,141,0,0,0,0,0,0,56,101,59,0,0,0,0,8,121,13,0,0,0,0,128,255,248,255,142,0,
++0,0,131,255,42,0,0,0,20,252,177,4,150,254,37,0,31,247,168,0,0,0,0,66,255,97,0,71,255,86,0,170,
++246,30,0,0,0,0,60,255,98,0,76,255,92,61,255,129,0,0,0,0,0,18,247,170,1,150,255,45,206,228,21,129,
++178,138,17,0,0,122,255,245,255,159,100,255,91,180,250,177,241,208,2,0,0,56,105,71,16,233,199,30,255,147,0,102,
++255,66,0,0,0,0,0,139,254,54,61,255,100,0,58,255,102,0,0,0,0,37,249,161,0,42,255,116,0,76,255,91,
++0,0,0,0,178,244,26,0,4,222,214,66,190,250,27,0,0,0,23,255,121,0,0,0,60,230,255,244,100,0,0,0,
++0,0,55,2,0,0,0,0,1,29,9,0,0,0,0,0,18,89,100,49,0,0,0,0,0,0,0,58,239,255,255,255,
++126,0,0,0,0,0,0,190,255,68,13,200,249,5,0,0,0,0,0,214,254,10,0,180,247,5,0,0,0,0,0,143,
++255,145,131,255,162,0,0,0,0,0,0,16,250,255,255,170,10,14,201,75,0,0,10,183,255,255,255,111,0,76,255,95,
++0,0,158,255,149,33,223,254,97,142,255,41,0,4,250,246,5,0,33,227,252,255,204,0,0,10,255,249,15,0,0,44,
++255,255,142,0,0,0,181,255,209,121,126,215,255,255,252,86,0,0,16,161,247,255,255,214,85,39,228,212,0,0,0,0,
++7,32,21,0,0,0,7,8,0,0,64,49,0,17,253,237,0,8,255,232,0,0,237,207,0,0,206,178,0,0,59,47,
++0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,30,60,0,0,
++0,0,202,228,0,0,0,75,255,164,0,0,0,180,255,85,0,0,5,243,255,26,0,0,53,255,234,0,0,0,78,255,
++209,0,0,0,97,255,196,0,0,0,93,255,203,0,0,0,73,255,219,0,0,0,31,255,250,6,0,0,0,229,255,51,
++0,0,0,143,255,120,0,0,0,35,250,197,0,0,0,0,135,199,0,0,0,0,0,0,0,1,80,7,0,0,0,44,
++255,135,0,0,0,2,234,245,20,0,0,0,158,255,104,0,0,0,99,255,181,0,0,0,50,255,232,0,0,0,25,255,
++255,10,0,0,9,255,255,25,0,0,16,255,255,16,0,0,31,255,249,0,0,0,68,255,210,0,0,0,116,255,143,0,
++0,0,188,255,66,0,0,17,251,202,0,0,0,32,232,68,0,0,0,0,0,0,0,0,0,0,2,41,0,28,16,0,
++0,56,249,43,220,114,0,0,21,190,233,234,37,4,107,255,255,255,255,255,170,6,42,205,243,246,52,16,0,56,252,50,
++230,110,0,0,6,58,0,41,23,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
++0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,100,44,0,0,0,0,0,0,0,0,238,134,0,0,0,
++0,0,0,0,0,240,136,0,0,0,0,2,65,76,76,244,171,76,76,36,0,36,255,255,255,255,255,255,255,186,0,0,
++19,28,28,241,149,28,28,7,0,0,0,0,0,240,136,0,0,0,0,0,0,0,0,237,132,0,0,0,0,0,0,0,
++0,82,35,0,0,0,0,0,39,34,0,28,251,246,18,16,237,255,38,0,77,236,3,0,165,94,0,0,0,0,0,0,
++8,24,24,24,7,0,1,230,255,255,255,215,0,0,93,132,132,132,86,0,0,0,0,0,0,0,0,0,0,0,0,0,
++0,0,0,0,0,0,0,0,0,0,37,38,0,27,251,250,25,17,232,232,15,0,4,4,0,0,0,0,0,0,2,0,
++0,0,0,0,87,242,17,0,0,0,0,184,235,3,0,0,0,16,250,157,0,0,0,0,93,255,75,0,0,0,0,175,
++241,7,0,0,0,11,246,166,0,0,0,0,84,255,83,0,0,0,0,166,246,10,0,0,0,6,241,174,0,0,0,0,
++75,255,92,0,0,0,0,157,250,15,0,0,0,3,235,183,0,0,0,0,16,242,86,0,0,0,0,0,1,0,0,0,
++0,0,0,0,0,53,100,91,24,0,0,0,0,6,173,255,255,255,247,92,0,0,0,128,255,205,82,113,249,250,35,0,
++1,234,252,27,0,0,125,255,135,0,40,255,207,0,0,0,55,255,193,0,66,255,179,0,0,0,28,255,221,0,76,255,
++174,0,0,0,22,255,227,0,64,255,186,0,0,0,35,255,211,0,26,255,225,0,0,0,72,255,173,0,0,211,255,69,
++0,0,170,255,103,0,0,85,255,241,154,186,255,222,8,0,0,0,104,236,255,255,193,34,0,0,0,0,0,4,31,15,
++0,0,0,0,0,0,0,0,20,85,9,0,0,0,0,0,4,114,242,255,80,0,0,0,0,25,211,255,255,255,88,0,
++0,0,0,54,237,135,194,255,88,0,0,0,0,0,0,0,184,255,88,0,0,0,0,0,0,0,184,255,88,0,0,0,
++0,0,0,0,184,255,88,0,0,0,0,0,0,0,184,255,88,0,0,0,0,0,0,0,184,255,88,0,0,0,0,0,
++0,0,184,255,88,0,0,0,0,31,169,180,234,255,206,179,102,0,0,58,244,255,255,255,255,255,165,0,0,0,16,70,
++103,90,26,0,0,0,0,136,244,255,255,255,250,111,0,0,9,244,201,105,81,147,255,253,30,0,0,10,0,0,0,0,
++202,255,78,0,0,0,0,0,0,0,204,255,54,0,0,0,0,0,0,55,254,221,4,0,0,0,0,0,28,227,255,81,
++0,0,0,0,0,21,215,255,129,0,0,0,0,0,14,205,255,144,0,0,0,0,0,9,194,255,153,0,0,0,0,0,
++0,155,255,255,181,180,180,180,112,0,0,169,255,255,255,255,255,255,178,0,0,0,17,72,103,90,27,0,0,0,0,137,
++245,255,255,255,250,111,0,0,6,237,199,106,80,134,254,252,29,0,0,4,0,0,0,0,186,255,69,0,0,0,0,0,
++0,7,221,254,28,0,0,0,15,126,148,212,252,121,0,0,0,0,63,255,255,255,234,98,0,0,0,0,0,27,42,78,
++218,255,72,0,0,0,0,0,0,0,100,255,151,0,5,74,15,0,0,0,150,255,146,0,66,255,245,178,152,191,255,251,
++53,0,0,100,208,254,255,255,212,75,0,0,0,0,0,7,33,19,0,0,0,0,0,0,0,0,0,4,82,22,0,0,
++0,0,0,0,0,151,255,151,0,0,0,0,0,0,75,255,255,160,0,0,0,0,0,20,231,255,255,160,0,0,0,0,
++0,172,248,151,255,160,0,0,0,0,93,255,116,108,255,160,0,0,0,29,240,195,2,108,255,160,0,0,0,187,243,34,
++0,108,255,160,0,0,78,255,255,216,216,232,255,241,202,36,60,207,220,220,220,235,255,242,206,38,0,0,0,0,0,108,
++255,160,0,0,0,0,0,0,0,77,255,129,0,0,0,0,0,0,0,0,20,1,0,0,0,11,68,72,72,72,72,62,
++5,0,0,143,255,255,255,255,255,255,87,0,0,160,255,163,108,108,108,98,14,0,0,160,255,96,0,0,0,0,0,0,
++0,160,255,96,12,36,10,0,0,0,0,160,255,241,249,255,246,138,3,0,0,158,255,228,153,156,245,255,119,0,0,61,
++133,15,0,0,69,255,219,0,0,0,0,0,0,0,6,255,244,0,0,57,47,0,0,0,79,255,208,0,0,217,255,202,
++156,177,249,255,91,0,0,47,168,248,255,255,226,100,0,0,0,0,0,2,27,25,1,0,0,0,0,0,0,8,72,104,
++79,19,0,0,0,0,69,230,255,255,255,245,116,0,0,40,248,250,136,81,109,203,174,0,0,165,255,103,0,0,0,0,
++0,0,1,240,246,6,15,52,23,0,0,0,27,255,211,103,247,255,253,153,3,0,40,255,236,245,132,117,230,255,115,0,
++26,255,255,113,0,0,57,255,209,0,3,241,255,58,0,0,5,253,232,0,0,167,255,122,0,0,67,255,195,0,0,38,
++244,252,158,145,237,255,83,0,0,0,55,204,255,255,233,102,0,0,0,0,0,0,17,30,3,0,0,0,0,53,72,72,
++72,72,72,70,18,0,39,255,255,255,255,255,255,255,192,0,3,94,112,112,112,112,241,255,147,0,0,0,0,0,0,34,
++250,248,29,0,0,0,0,0,0,165,255,143,0,0,0,0,0,0,46,254,243,21,0,0,0,0,0,0,181,255,131,0,
++0,0,0,0,0,61,255,237,15,0,0,0,0,0,0,197,255,119,0,0,0,0,0,0,78,255,231,10,0,0,0,0,
++0,1,211,255,107,0,0,0,0,0,0,15,249,209,6,0,0,0,0,0,0,0,13,3,0,0,0,0,0,0,0,0,
++9,72,104,97,46,0,0,0,0,56,230,255,255,255,255,178,9,0,0,222,255,142,51,70,207,255,122,0,18,255,222,0,
++0,0,66,255,175,0,1,237,239,14,0,0,104,255,143,0,0,93,252,217,143,163,250,221,19,0,0,43,230,255,255,255,
++255,150,7,0,17,229,242,91,33,45,155,255,147,0,85,255,149,0,0,0,2,246,232,0,81,255,178,0,0,0,25,253,
++232,0,12,231,255,179,121,133,222,255,140,0,0,41,186,251,255,255,236,134,4,0,0,0,0,10,33,27,2,0,0,0,
++0,0,9,80,103,71,4,0,0,0,0,52,231,255,255,255,222,42,0,0,4,224,255,132,52,127,255,221,6,0,61,255,
++193,0,0,0,185,255,88,0,80,255,166,0,0,0,158,255,155,0,41,255,234,27,0,23,249,255,182,0,0,180,255,239,
++191,238,198,255,189,0,0,11,147,228,228,143,74,255,170,0,0,0,0,0,0,0,122,255,121,0,0,46,4,0,0,28,
++231,252,34,0,49,255,226,158,163,240,255,131,0,0,2,120,232,255,255,230,110,0,0,0,0,0,0,24,27,1,0,0,
++0,0,9,192,193,8,35,255,255,32,0,81,81,0,0,0,0,0,0,0,0,0,0,37,38,0,27,251,250,25,17,232,
++232,15,0,4,4,0,9,192,193,8,35,255,255,32,0,81,81,0,0,0,0,0,0,0,0,0,0,39,34,0,28,251,
++246,18,16,237,255,38,0,77,236,3,0,165,94,0,0,0,0,0,0,0,0,0,0,0,0,41,70,0,0,0,0,0,
++2,77,187,255,207,0,0,0,17,115,222,255,205,98,9,0,1,142,245,249,165,58,0,0,0,0,24,255,255,87,0,0,
++0,0,0,0,0,95,216,255,212,105,12,0,0,0,0,0,1,70,178,253,241,145,35,0,0,0,0,0,0,32,138,236,
++219,0,0,0,0,0,0,0,0,8,28,0,28,217,228,228,228,228,228,228,153,0,9,121,132,132,132,132,132,132,76,0,
++0,0,0,0,0,0,0,0,0,0,19,169,180,180,180,180,180,180,115,0,18,169,180,180,180,180,180,180,115,0,0,0,
++0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,11,87,12,0,0,0,0,0,0,0,54,252,241,144,
++37,0,0,0,0,0,0,33,139,237,254,181,72,1,0,0,0,0,0,9,99,206,255,218,71,0,0,0,0,0,0,12,
++165,255,204,0,0,0,0,39,146,241,252,176,39,0,0,77,186,254,235,136,30,0,0,0,63,255,203,96,7,0,0,0,
++0,0,1,35,0,0,0,0,0,0,0,0,0,6,65,100,90,22,0,0,95,231,255,255,255,246,89,0,213,220,121,81,
++139,255,241,5,9,0,0,0,0,247,255,14,0,0,0,0,80,255,195,0,0,0,0,29,237,233,36,0,0,0,0,178,
++240,48,0,0,0,0,5,252,112,0,0,0,0,0,2,160,23,0,0,0,0,0,6,61,9,0,0,0,0,0,140,255,
++156,0,0,0,0,0,111,255,127,0,0,0,0,0,0,9,0,0,0,0,0,0,0,0,0,12,71,99,99,71,11,0,
++0,0,0,0,0,0,24,155,249,247,219,216,244,243,142,9,0,0,0,0,44,229,217,85,6,0,0,5,76,218,203,9,
++0,0,12,223,194,13,0,0,0,0,0,0,15,218,143,0,0,121,243,27,0,44,188,241,205,87,201,20,83,243,12,0,
++211,159,0,24,236,221,97,117,255,254,12,8,254,56,9,255,96,0,132,254,41,0,0,197,220,0,0,240,81,29,255,71,
++0,186,218,0,0,0,200,175,0,10,255,67,19,255,84,0,184,219,0,0,23,255,136,0,60,252,17,1,237,123,0,123,
++255,116,68,198,255,188,50,201,163,0,0,162,212,1,10,169,249,242,118,67,234,253,178,14,0,0,43,251,117,0,0,4,
++1,0,0,0,5,0,0,0,0,0,105,253,136,14,0,0,0,0,56,160,22,0,0,0,0,0,82,227,246,188,160,175,
++213,255,180,9,0,0,0,0,0,0,7,77,135,157,153,117,46,0,0,0,0,0,0,0,0,0,62,53,0,0,0,0,
++0,0,0,0,0,58,255,252,41,0,0,0,0,0,0,0,0,177,255,255,157,0,0,0,0,0,0,0,38,254,179,203,
++248,23,0,0,0,0,0,0,152,255,71,96,255,132,0,0,0,0,0,20,246,219,1,8,235,237,10,0,0,0,0,127,
++255,113,0,0,135,255,108,0,0,0,8,233,255,76,60,60,90,255,221,2,0,0,101,255,255,255,255,255,255,255,255,84,
++0,1,215,255,138,100,100,100,100,157,255,199,0,74,255,188,0,0,0,0,0,0,209,255,58,115,253,69,0,0,0,0,
++0,0,84,254,103,0,13,0,0,0,0,0,0,0,0,14,0,0,17,69,72,72,72,64,28,0,0,0,0,176,255,255,
++255,255,255,255,186,19,0,0,196,255,106,68,68,92,207,255,163,0,0,196,255,52,0,0,0,46,255,218,0,0,196,255,
++52,0,0,0,66,255,184,0,0,196,255,154,128,128,150,237,234,48,0,0,196,255,255,255,255,255,255,181,27,0,0,196,
++255,64,16,16,28,114,255,207,1,0,196,255,52,0,0,0,0,221,255,28,0,196,255,52,0,0,0,16,242,255,23,0,
++195,255,163,140,140,151,222,255,182,0,0,138,254,255,255,255,249,218,133,13,0,0,0,0,0,33,89,104,76,23,0,0,
++0,0,25,180,255,255,255,255,250,161,5,0,16,220,255,232,139,107,133,219,254,29,0,139,255,218,21,0,0,0,1,26,
++0,0,229,255,90,0,0,0,0,0,0,0,19,255,255,30,0,0,0,0,0,0,0,29,255,255,17,0,0,0,0,0,
++0,0,7,255,255,42,0,0,0,0,0,0,0,0,205,255,120,0,0,0,0,0,0,0,0,100,255,243,66,0,0,0,
++34,96,3,0,0,170,255,255,209,179,202,253,255,41,0,0,1,110,217,255,255,253,203,85,0,0,0,0,0,0,13,32,
++6,0,0,0,0,17,69,72,72,68,51,9,0,0,0,0,0,176,255,255,255,255,255,250,168,29,0,0,0,196,255,149,
++108,117,152,232,255,235,36,0,0,196,255,72,0,0,0,15,183,255,187,0,0,196,255,72,0,0,0,0,31,255,255,25,
++0,196,255,72,0,0,0,0,0,223,255,71,0,196,255,72,0,0,0,0,0,212,255,82,0,196,255,72,0,0,0,0,
++1,245,255,62,0,196,255,72,0,0,0,0,73,255,248,11,0,196,255,72,0,0,0,59,224,255,146,0,0,195,255,201,
++180,188,221,254,255,187,9,0,0,138,254,255,255,253,235,186,94,2,0,0,0,17,69,72,72,72,72,72,29,0,0,176,
++255,255,255,255,255,255,196,0,0,196,255,125,92,92,92,92,42,0,0,196,255,52,0,0,0,0,0,0,0,196,255,52,
++0,0,0,0,0,0,0,196,255,163,140,140,140,135,33,0,0,196,255,255,255,255,255,255,100,0,0,196,255,71,24,24,
++24,19,0,0,0,196,255,52,0,0,0,0,0,0,0,196,255,52,0,0,0,0,0,0,0,195,255,179,160,160,160,160,
++94,0,0,138,254,255,255,255,255,255,174,0,0,17,69,72,72,72,72,71,20,0,176,255,255,255,255,255,255,164,0,196,
++255,138,92,92,92,91,31,0,196,255,72,0,0,0,0,0,0,196,255,72,0,0,0,0,0,0,196,255,158,120,120,120,
++111,16,0,196,255,255,255,255,255,255,77,0,196,255,103,44,44,44,35,0,0,196,255,72,0,0,0,0,0,0,196,255,
++72,0,0,0,0,0,0,196,255,72,0,0,0,0,0,0,160,253,44,0,0,0,0,0,0,3,18,0,0,0,0,0,
++0,0,0,0,0,28,85,105,84,45,0,0,0,0,0,19,171,254,255,255,255,255,211,45,0,0,13,214,255,229,134,99,
++117,182,254,112,0,0,134,255,216,19,0,0,0,0,18,1,0,0,227,255,86,0,0,0,0,0,0,0,0,18,255,255,
++24,0,0,0,22,24,22,0,0,30,255,255,11,0,0,139,255,255,255,134,0,8,255,255,42,0,0,36,106,119,255,164,
++0,0,207,255,117,0,0,0,0,20,255,164,0,0,102,255,240,51,0,0,0,20,255,164,0,0,1,170,255,253,193,157,
++170,231,255,159,0,0,0,1,106,211,255,255,255,245,183,54,0,0,0,0,0,0,10,33,21,2,0,0,0,0,36,85,
++1,0,0,0,0,0,50,73,0,0,185,255,61,0,0,0,0,0,215,255,26,0,196,255,72,0,0,0,0,0,232,255,
++36,0,196,255,72,0,0,0,0,0,232,255,36,0,196,255,72,0,0,0,0,0,232,255,36,0,196,255,178,148,148,148,
++148,148,245,255,36,0,196,255,255,255,255,255,255,255,255,255,36,0,196,255,97,36,36,36,36,36,235,255,36,0,196,255,
++72,0,0,0,0,0,232,255,36,0,196,255,72,0,0,0,0,0,232,255,36,0,196,255,72,0,0,0,0,0,232,255,
++36,0,162,251,42,0,0,0,0,0,192,242,15,0,3,17,0,0,0,0,0,0,7,14,0,0,36,85,1,0,0,185,
++255,61,0,0,196,255,72,0,0,196,255,72,0,0,196,255,72,0,0,196,255,72,0,0,196,255,72,0,0,196,255,72,
++0,0,196,255,72,0,0,196,255,72,0,0,196,255,72,0,0,162,251,42,0,0,3,17,0,0,0,0,0,22,92,11,
++0,0,0,0,135,255,106,0,0,0,0,152,255,116,0,0,0,0,152,255,116,0,0,0,0,152,255,116,0,0,0,0,
++152,255,116,0,0,0,0,152,255,116,0,0,0,0,152,255,116,0,0,0,0,152,255,115,0,0,0,0,190,255,96,0,
++7,131,190,255,245,26,0,26,251,255,210,67,0,0,0,16,11,0,0,0,0,0,37,86,2,0,0,0,0,65,55,0,
++0,186,255,62,0,0,0,123,255,177,0,0,196,255,72,0,0,123,255,220,29,0,0,196,255,72,0,122,255,219,28,0,
++0,0,196,255,72,121,255,218,27,0,0,0,0,196,255,184,255,219,26,0,0,0,0,0,196,255,248,255,187,2,0,0,
++0,0,0,196,255,100,220,255,159,2,0,0,0,0,196,255,72,28,220,255,156,1,0,0,0,196,255,72,0,28,220,255,
++154,1,0,0,196,255,72,0,0,28,220,255,148,0,0,162,251,42,0,0,0,28,215,240,4,0,3,17,0,0,0,0,
++0,3,10,0,0,26,66,0,0,0,0,0,0,0,182,255,58,0,0,0,0,0,0,196,255,72,0,0,0,0,0,0,
++196,255,72,0,0,0,0,0,0,196,255,72,0,0,0,0,0,0,196,255,72,0,0,0,0,0,0,196,255,72,0,0,
++0,0,0,0,196,255,72,0,0,0,0,0,0,196,255,72,0,0,0,0,0,0,196,255,72,0,0,0,0,0,0,195,
++255,210,192,192,192,191,103,0,141,254,255,255,255,255,255,154,0,31,80,0,0,0,0,0,0,0,2,83,23,0,0,174,
++255,101,0,0,0,0,0,0,114,255,150,0,0,188,255,231,11,0,0,0,0,16,238,255,164,0,0,188,255,255,125,0,
++0,0,0,138,255,255,164,0,0,188,255,246,242,21,0,0,28,247,244,255,164,0,0,188,255,109,255,145,0,0,158,254,
++106,255,164,0,0,188,255,32,191,249,34,43,253,163,56,255,164,0,0,188,255,32,51,254,166,179,248,31,56,255,164,0,
++0,188,255,32,0,165,255,255,139,0,56,255,164,0,0,188,255,32,0,31,247,237,16,0,56,255,164,0,0,188,255,32,
++0,0,58,49,0,0,56,255,164,0,0,153,242,11,0,0,0,0,0,0,28,249,129,0,0,1,9,0,0,0,0,0,
++0,0,0,11,0,0,0,39,68,0,0,0,0,0,0,79,36,0,0,180,255,92,0,0,0,0,29,255,173,0,0,196,
++255,245,44,0,0,0,44,255,188,0,0,196,255,255,217,13,0,0,44,255,188,0,0,196,255,176,255,172,0,0,44,255,
++188,0,0,196,255,40,194,255,113,0,44,255,188,0,0,196,255,36,26,232,251,59,44,255,188,0,0,196,255,36,0,65,
++252,229,66,255,188,0,0,196,255,36,0,0,121,255,234,255,188,0,0,196,255,36,0,0,1,179,255,255,188,0,0,196,
++255,36,0,0,0,17,222,255,188,0,0,158,242,12,0,0,0,0,50,242,154,0,0,1,9,0,0,0,0,0,0,11,
++2,0,0,0,0,0,40,93,103,74,11,0,0,0,0,0,0,26,186,255,255,255,255,240,113,0,0,0,0,16,220,255,
++212,110,87,138,245,255,125,0,0,0,139,255,205,10,0,0,0,69,255,251,32,0,0,229,255,80,0,0,0,0,0,192,
++255,120,0,19,255,255,22,0,0,0,0,0,140,255,162,0,29,255,255,11,0,0,0,0,0,118,255,177,0,7,255,255,
++40,0,0,0,0,0,142,255,156,0,0,204,255,117,0,0,0,0,2,215,255,97,0,0,98,255,236,41,0,0,0,132,
++255,233,10,0,0,0,169,255,248,178,161,214,255,248,69,0,0,0,0,1,111,221,255,255,251,185,51,0,0,0,0,0,
++0,0,0,17,33,10,0,0,0,0,0,0,19,70,72,72,72,58,20,0,0,0,179,255,255,255,255,255,254,159,11,0,
++196,255,132,84,84,109,217,255,151,0,196,255,72,0,0,0,40,255,234,0,196,255,72,0,0,0,10,255,248,0,196,255,
++72,0,0,1,124,255,203,0,196,255,227,216,216,239,255,249,70,0,196,255,215,200,200,186,147,37,0,0,196,255,72,0,
++0,0,0,0,0,0,196,255,72,0,0,0,0,0,0,0,196,255,72,0,0,0,0,0,0,0,162,251,42,0,0,0,
++0,0,0,0,3,17,0,0,0,0,0,0,0,0,0,0,0,40,93,103,74,11,0,0,0,0,0,0,26,186,255,255,
++255,255,240,113,0,0,0,0,16,220,255,212,110,87,138,245,255,125,0,0,0,139,255,205,10,0,0,0,69,255,251,32,
++0,0,229,255,80,0,0,0,0,0,192,255,120,0,19,255,255,22,0,0,0,0,0,140,255,162,0,29,255,255,11,0,
++0,0,0,0,118,255,177,0,7,255,255,40,0,0,0,0,0,142,255,156,0,0,204,255,117,0,0,0,0,2,215,255,
++97,0,0,98,255,236,41,0,0,0,132,255,233,10,0,0,0,169,255,248,178,161,214,255,248,69,0,0,0,0,1,111,
++221,255,255,255,255,60,0,0,0,0,0,0,0,0,17,69,173,255,187,1,0,0,0,0,0,0,0,0,0,3,208,255,
++104,0,0,0,0,0,0,0,0,0,0,55,248,175,0,0,0,0,0,0,0,0,0,0,0,28,10,0,0,0,19,70,
++72,72,72,58,22,0,0,0,0,179,255,255,255,255,255,254,167,15,0,0,196,255,132,84,84,109,216,255,161,0,0,196,
++255,72,0,0,0,36,255,239,0,0,196,255,72,0,0,0,13,255,243,0,0,196,255,77,8,8,32,160,255,180,0,0,
++196,255,255,255,255,255,255,214,31,0,0,196,255,161,125,160,255,231,29,0,0,0,196,255,72,0,0,122,255,194,0,0,
++0,196,255,72,0,0,8,227,255,82,0,0,196,255,72,0,0,0,98,255,216,2,0,162,251,42,0,0,0,2,197,252,
++20,0,3,17,0,0,0,0,0,1,13,0,0,0,0,32,81,102,71,18,0,0,0,7,160,253,255,255,255,246,146,2,
++0,153,255,220,110,81,111,196,244,15,2,248,255,25,0,0,0,0,4,0,2,246,255,41,0,0,0,0,0,0,0,165,
++255,242,162,102,44,0,0,0,0,12,150,243,255,255,255,221,83,0,0,0,0,8,64,116,191,255,253,56,0,0,0,0,
++0,0,0,156,255,129,4,107,40,0,0,0,0,174,255,115,36,255,255,199,161,153,204,255,234,23,0,75,190,249,255,255,
++248,168,36,0,0,0,0,7,29,27,2,0,0,0,0,40,72,72,72,72,72,72,72,72,37,1,242,255,255,255,255,255,
++255,255,255,231,0,73,112,112,118,255,255,112,112,112,68,0,0,0,0,12,255,255,0,0,0,0,0,0,0,0,12,255,
++255,0,0,0,0,0,0,0,0,12,255,255,0,0,0,0,0,0,0,0,12,255,255,0,0,0,0,0,0,0,0,12,
++255,255,0,0,0,0,0,0,0,0,12,255,255,0,0,0,0,0,0,0,0,12,255,255,0,0,0,0,0,0,0,0,
++12,255,255,0,0,0,0,0,0,0,0,2,232,222,0,0,0,0,0,0,0,0,0,11,9,0,0,0,0,0,45,80,
++0,0,0,0,0,6,90,27,0,0,206,255,42,0,0,0,0,86,255,158,0,0,216,255,52,0,0,0,0,96,255,168,
++0,0,216,255,52,0,0,0,0,96,255,168,0,0,216,255,52,0,0,0,0,96,255,168,0,0,216,255,52,0,0,0,
++0,96,255,168,0,0,216,255,52,0,0,0,0,96,255,168,0,0,212,255,58,0,0,0,0,103,255,163,0,0,191,255,
++94,0,0,0,0,139,255,139,0,0,129,255,208,15,0,0,31,237,255,72,0,0,21,230,255,231,169,176,242,255,193,2,
++0,0,0,33,176,249,255,255,240,150,13,0,0,0,0,0,0,7,33,27,3,0,0,0,0,33,77,0,0,0,0,0,
++0,0,31,77,0,176,255,83,0,0,0,0,0,1,214,255,23,98,255,198,0,0,0,0,0,76,255,205,0,7,232,255,
++52,0,0,0,0,186,255,90,0,0,126,255,163,0,0,0,40,254,227,4,0,0,20,247,249,24,0,0,150,255,118,0,
++0,0,0,154,255,129,0,15,244,243,16,0,0,0,0,41,254,232,6,114,255,145,0,0,0,0,0,0,183,255,96,221,
++253,34,0,0,0,0,0,0,69,255,255,255,172,0,0,0,0,0,0,0,0,210,255,255,58,0,0,0,0,0,0,0,
++0,79,254,183,0,0,0,0,0,0,0,0,0,0,14,1,0,0,0,0,0,5,87,23,0,0,0,0,0,53,45,0,
++0,0,0,0,26,80,0,70,255,179,0,0,0,0,21,245,235,8,0,0,0,0,192,255,30,14,247,251,20,0,0,0,
++108,255,255,83,0,0,0,31,255,220,0,0,171,255,102,0,0,0,199,255,255,170,0,0,0,119,255,129,0,0,81,255,
++189,0,0,34,255,176,219,245,11,0,0,207,255,38,0,0,7,239,252,22,0,124,255,85,130,255,89,0,38,255,203,0,
++0,0,0,156,255,105,0,214,241,8,40,255,176,0,127,255,111,0,0,0,0,65,255,191,49,255,159,0,0,206,248,15,
++214,252,24,0,0,0,0,2,228,253,163,255,68,0,0,116,255,142,255,185,0,0,0,0,0,0,140,255,255,230,3,0,
++0,28,254,255,255,94,0,0,0,0,0,0,50,255,255,142,0,0,0,0,193,255,246,12,0,0,0,0,0,0,0,192,
++247,39,0,0,0,0,82,254,145,0,0,0,0,0,0,0,0,1,11,0,0,0,0,0,0,13,0,0,0,0,0,0,
++74,32,0,0,0,0,0,56,52,0,23,255,231,24,0,0,0,67,252,222,0,0,150,255,186,1,0,20,230,255,94,0,
++0,8,208,255,119,0,178,255,158,0,0,0,0,38,243,250,162,255,212,10,0,0,0,0,0,90,255,255,247,41,0,0,
++0,0,0,0,19,255,255,229,1,0,0,0,0,0,1,180,255,255,255,120,0,0,0,0,0,119,255,210,45,243,251,60,
++0,0,0,60,251,246,42,0,93,255,227,20,0,18,228,255,101,0,0,0,162,255,181,0,58,254,160,0,0,0,0,12,
++208,239,8,0,13,0,0,0,0,0,0,3,10,0,28,78,0,0,0,0,0,1,81,24,152,255,130,0,0,0,0,139,
++255,127,45,247,252,60,0,0,68,254,237,27,0,111,255,223,14,18,229,255,83,0,0,1,183,255,161,172,255,157,0,0,
++0,0,24,234,255,255,219,12,0,0,0,0,0,91,255,255,55,0,0,0,0,0,0,20,255,255,0,0,0,0,0,0,
++0,20,255,248,0,0,0,0,0,0,0,20,255,248,0,0,0,0,0,0,0,20,255,248,0,0,0,0,0,0,0,6,
++236,216,0,0,0,0,0,0,0,0,12,9,0,0,0,0,3,60,72,72,72,72,72,72,45,0,72,255,255,255,255,255,
++255,255,254,27,11,100,112,112,112,112,199,255,213,3,0,0,0,0,0,35,241,248,47,0,0,0,0,0,6,203,255,106,
++0,0,0,0,0,0,142,255,173,0,0,0,0,0,0,76,254,224,16,0,0,0,0,0,27,236,251,56,0,0,0,0,
++0,3,193,255,117,0,0,0,0,0,0,130,255,183,1,0,0,0,0,0,38,252,255,205,184,184,184,184,175,43,45,240,
++255,255,255,255,255,255,248,75,0,1,57,72,70,13,0,60,255,255,255,127,0,76,255,196,54,8,0,76,255,180,0,0,
++0,76,255,180,0,0,0,76,255,180,0,0,0,76,255,180,0,0,0,76,255,180,0,0,0,76,255,180,0,0,0,76,
++255,180,0,0,0,76,255,180,0,0,0,76,255,180,0,0,0,76,255,180,0,0,0,76,255,227,158,55,0,31,209,224,
++222,94,0,2,0,0,0,0,0,14,241,86,0,0,0,0,2,233,183,0,0,0,0,0,155,250,16,0,0,0,0,73,
++255,93,0,0,0,0,6,240,175,0,0,0,0,0,165,246,11,0,0,0,0,82,255,85,0,0,0,0,10,245,167,0,
++0,0,0,0,174,242,7,0,0,0,0,92,255,77,0,0,0,0,15,250,159,0,0,0,0,0,184,237,4,0,0,0,
++0,86,242,17,0,0,0,0,0,1,0,37,72,72,34,0,0,216,255,255,231,0,0,26,62,255,248,0,0,0,8,255,
++248,0,0,0,8,255,248,0,0,0,8,255,248,0,0,0,8,255,248,0,0,0,8,255,248,0,0,0,8,255,248,0,
++0,0,8,255,248,0,0,0,8,255,248,0,0,0,8,255,248,0,0,0,8,255,248,0,0,109,163,255,248,0,0,169,
++224,224,165,0,0,0,0,0,0,21,5,0,0,0,0,0,0,0,42,255,212,0,0,0,0,0,0,0,155,255,255,54,
++0,0,0,0,0,17,246,125,221,163,0,0,0,0,0,117,249,22,116,249,23,0,0,0,2,223,163,0,17,246,125,0,
++0,0,79,255,55,0,0,156,229,5,0,0,187,204,0,0,0,48,255,87,0,0,198,76,0,0,0,0,163,113,0,0,
++0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,169,255,255,255,255,255,255,169,22,52,52,52,52,
++52,52,22,0,8,77,1,0,0,0,76,255,97,0,0,0,2,194,220,4,0,0,0,33,243,78,0,0,0,0,39,11,
++0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
++0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,59,168,228,245,217,118,0,0,0,189,230,161,141,220,
++255,96,0,0,7,1,0,0,60,255,175,0,0,14,92,137,156,199,255,195,0,14,225,253,174,139,169,255,196,0,70,255,
++184,0,0,79,255,196,0,35,253,237,85,88,221,255,196,0,0,99,240,255,243,91,239,159,0,0,0,6,31,4,0,14,
++5,0,0,57,65,0,0,0,0,0,0,0,0,228,252,6,0,0,0,0,0,0,0,244,255,12,0,0,0,0,0,0,
++0,244,255,12,0,0,0,0,0,0,0,244,255,69,199,243,211,85,0,0,0,244,255,242,159,165,252,254,71,0,0,244,
++255,96,0,0,107,255,188,0,0,244,255,17,0,0,26,255,238,0,0,244,255,16,0,0,17,255,241,0,0,244,255,78,
++0,0,81,255,200,0,0,244,255,233,118,116,235,255,97,0,0,207,228,94,239,255,246,130,1,0,0,9,11,0,6,31,
++9,0,0,0,0,2,104,214,245,223,140,10,0,144,255,235,160,178,251,63,34,253,246,32,0,0,7,0,88,255,186,0,
++0,0,0,0,88,255,182,0,0,0,0,0,41,255,238,15,0,0,0,0,0,179,255,211,116,131,207,37,0,13,156,247,
++255,254,181,17,0,0,0,7,32,13,0,0,0,0,0,0,0,0,10,92,19,0,0,0,0,0,0,0,96,255,135,0,
++0,0,0,0,0,0,112,255,144,0,0,0,0,0,0,0,112,255,144,0,0,10,148,233,236,153,122,255,144,0,0,176,
++255,219,146,202,250,255,144,0,39,255,238,17,0,3,200,255,144,0,87,255,174,0,0,0,122,255,144,0,90,255,172,0,
++0,0,113,255,144,0,51,255,229,7,0,0,179,255,144,0,0,203,255,191,103,156,255,255,144,0,0,30,196,255,255,201,
++99,255,113,0,0,0,0,22,24,0,0,20,0,0,0,0,104,211,244,216,94,0,0,0,137,255,181,104,164,255,101,0,
++26,252,208,1,0,1,200,225,0,84,255,255,156,156,156,225,255,14,88,255,252,140,140,140,140,123,2,41,255,211,2,0,
++0,0,0,0,0,173,255,192,108,107,177,220,0,0,10,147,242,255,255,225,106,0,0,0,0,5,30,22,0,0,0,0,
++0,0,5,53,67,0,0,0,86,238,255,253,19,0,29,247,243,93,29,0,0,88,255,158,0,0,0,164,255,255,245,211,
++113,0,130,211,255,221,175,87,0,0,112,255,144,0,0,0,0,112,255,144,0,0,0,0,112,255,144,0,0,0,0,112,
++255,144,0,0,0,0,112,255,144,0,0,0,0,81,255,116,0,0,0,0,0,21,0,0,0,0,0,8,144,234,237,164,
++63,230,103,0,0,171,255,222,146,197,254,255,159,0,38,255,238,26,0,1,185,255,160,0,83,255,180,0,0,0,103,255,
++160,0,86,255,181,0,0,0,118,255,160,0,31,255,248,42,0,12,211,255,160,0,0,149,255,246,195,230,224,255,160,0,
++0,2,108,189,194,118,93,255,154,0,0,10,2,0,0,0,150,255,118,0,0,212,229,152,130,174,254,240,26,0,0,74,
++183,239,255,238,181,43,0,0,0,0,0,0,5,0,0,0,0,0,0,57,65,0,0,0,0,0,0,0,228,252,6,0,
++0,0,0,0,0,244,255,12,0,0,0,0,0,0,244,255,12,0,0,0,0,0,0,244,255,70,198,244,217,84,0,0,
++244,255,245,170,183,255,247,21,0,244,255,92,0,0,197,255,79,0,244,255,18,0,0,161,255,95,0,244,255,12,0,0,
++160,255,96,0,244,255,12,0,0,160,255,96,0,244,255,12,0,0,160,255,96,0,207,236,3,0,0,122,255,66,0,9,
++12,0,0,0,1,20,0,0,98,106,1,28,255,255,44,0,110,118,2,0,0,0,0,0,167,195,0,0,243,255,11,0,
++244,255,12,0,244,255,12,0,244,255,12,0,244,255,12,0,244,255,12,0,202,229,2,0,7,9,0,0,0,90,112,3,
++0,12,255,255,60,0,0,102,124,5,0,0,0,0,0,0,0,159,211,7,0,0,227,255,27,0,0,228,255,28,0,0,
++228,255,28,0,0,228,255,28,0,0,228,255,28,0,0,228,255,28,0,0,228,255,27,0,3,242,255,14,72,179,255,201,
++0,187,245,179,33,0,0,1,0,0,0,0,57,65,0,0,0,0,0,0,0,228,252,6,0,0,0,0,0,0,244,255,
++12,0,0,0,0,0,0,244,255,12,0,0,0,0,0,0,244,255,12,0,38,207,144,0,0,244,255,12,33,228,254,94,
++0,0,244,255,38,222,255,111,0,0,0,244,255,221,255,127,0,0,0,0,244,255,223,255,159,1,0,0,0,244,255,40,
++223,255,142,0,0,0,244,255,12,34,228,255,123,0,0,207,236,3,0,39,227,232,0,0,9,12,0,0,0,4,10,0,
++0,57,65,0,0,0,0,228,252,6,0,0,0,244,255,12,0,0,0,244,255,12,0,0,0,244,255,12,0,0,0,244,
++255,12,0,0,0,244,255,12,0,0,0,244,255,12,0,0,0,244,255,12,0,0,0,232,255,29,0,0,0,185,255,194,
++123,5,0,47,224,255,243,8,0,0,1,29,16,0,0,167,199,59,204,243,193,30,83,213,243,193,33,0,0,235,255,237,
++164,209,255,218,241,162,211,255,181,0,0,236,255,91,0,24,255,255,77,0,28,255,244,0,0,236,255,26,0,0,249,255,
++14,0,0,252,255,3,0,236,255,20,0,0,248,255,8,0,0,252,255,4,0,236,255,20,0,0,248,255,8,0,0,252,
++255,4,0,236,255,20,0,0,248,255,8,0,0,252,255,4,0,199,239,7,0,0,217,231,1,0,0,215,228,0,0,8,
++13,0,0,0,9,11,0,0,0,10,10,0,0,175,182,58,198,244,217,84,0,0,243,255,236,170,183,255,247,21,0,244,
++255,92,0,0,197,255,79,0,244,255,18,0,0,161,255,95,0,244,255,12,0,0,160,255,96,0,244,255,12,0,0,160,
++255,96,0,244,255,12,0,0,160,255,96,0,207,236,3,0,0,122,255,66,0,9,12,0,0,0,1,20,0,0,1,105,
++215,245,224,141,12,0,0,140,255,219,146,202,255,197,4,32,252,238,17,0,3,200,255,83,87,255,174,0,0,0,122,255,
++139,88,255,172,0,0,0,113,255,147,43,255,229,7,0,0,178,255,100,0,182,255,191,103,156,255,216,7,0,15,161,249,
++255,254,180,30,0,0,0,0,9,33,16,0,0,0,0,175,196,57,199,243,210,83,0,0,0,243,255,236,159,165,252,254,
++71,0,0,244,255,97,0,0,107,255,188,0,0,244,255,17,0,0,26,255,238,0,0,244,255,16,0,0,17,255,241,0,
++0,244,255,78,0,0,81,255,200,0,0,244,255,236,118,116,235,255,97,0,0,244,255,103,237,255,247,132,1,0,0,244,
++255,12,5,31,9,0,0,0,0,244,255,12,0,0,0,0,0,0,0,184,211,1,0,0,0,0,0,0,0,0,0,0,
++0,0,0,0,0,0,0,10,148,233,236,154,62,232,89,0,0,176,255,219,146,202,254,255,143,0,39,255,238,17,0,3,
++204,255,144,0,87,255,174,0,0,0,122,255,144,0,90,255,172,0,0,0,113,255,144,0,51,255,229,7,0,0,178,255,
++144,0,0,203,255,191,103,156,255,255,144,0,0,30,196,255,255,197,138,255,144,0,0,0,0,22,24,0,112,255,144,0,
++0,0,0,0,0,0,112,255,144,0,0,0,0,0,0,0,63,238,96,0,0,0,0,0,0,0,0,0,0,0,0,0,
++0,0,0,0,0,0,175,182,50,193,234,25,0,243,255,231,231,171,11,0,244,255,140,1,0,0,0,244,255,31,0,0,
++0,0,244,255,20,0,0,0,0,244,255,20,0,0,0,0,244,255,20,0,0,0,0,206,238,7,0,0,0,0,9,12,
++0,0,0,0,0,36,171,236,240,199,97,0,6,226,245,135,120,183,223,0,38,255,181,0,0,0,0,0,6,224,255,194,
++137,78,5,0,0,25,132,191,240,255,200,5,0,0,0,0,7,187,255,50,57,202,122,74,85,223,247,17,22,170,248,255,
++255,223,76,0,0,0,6,29,22,0,0,0,0,0,3,50,5,0,0,0,0,0,109,255,109,0,0,0,0,0,124,255,
++132,0,0,0,6,188,233,255,234,212,173,0,2,152,214,255,217,176,136,0,0,0,124,255,132,0,0,0,0,0,124,255,
++132,0,0,0,0,0,124,255,132,0,0,0,0,0,114,255,153,0,0,0,0,0,60,255,247,145,137,23,0,0,0,131,
++247,255,248,32,0,0,0,0,9,34,13,0,0,191,182,0,0,0,136,214,22,3,255,251,0,0,0,199,255,55,4,255,
++252,0,0,0,200,255,56,4,255,252,0,0,0,200,255,56,3,255,252,0,0,0,203,255,56,0,247,255,17,0,15,242,
++255,56,0,193,255,183,115,203,255,255,56,0,47,222,255,254,159,155,251,33,0,0,1,30,17,0,3,17,0,106,223,42,
++0,0,0,131,212,6,113,255,154,0,0,19,247,230,1,18,245,243,13,0,116,255,124,0,0,154,255,103,1,219,247,20,
++0,0,44,255,206,70,255,155,0,0,0,0,189,255,227,255,44,0,0,0,0,79,255,255,187,0,0,0,0,0,2,197,
++250,59,0,0,0,0,0,0,1,12,0,0,0,0,80,224,55,0,0,6,198,148,0,0,0,103,218,17,87,255,164,0,
++0,82,255,255,23,0,1,223,245,10,8,239,245,12,0,176,255,255,112,0,62,255,159,0,0,148,255,94,19,250,167,241,
++204,0,155,255,59,0,0,47,255,187,107,255,63,154,255,49,240,214,0,0,0,0,204,253,228,223,1,58,255,219,255,115,
++0,0,0,0,104,255,255,129,0,0,216,255,250,21,0,0,0,0,13,223,238,28,0,0,97,254,148,0,0,0,0,0,
++0,5,8,0,0,0,0,13,0,0,0,0,6,211,166,3,0,21,200,159,0,1,189,255,135,3,189,255,129,0,0,20,
++224,254,218,255,180,2,0,0,0,48,255,255,240,15,0,0,0,0,59,255,255,242,21,0,0,0,27,232,252,198,255,193,
++5,0,5,201,255,118,2,182,255,150,0,36,251,162,0,0,17,210,226,0,0,6,0,0,0,0,1,4,0,109,223,42,
++0,0,0,133,212,6,117,255,154,0,0,21,249,230,1,20,247,243,13,0,119,255,123,0,0,157,255,103,1,221,247,20,
++0,0,47,255,206,71,255,155,0,0,0,0,193,255,228,255,43,0,0,0,0,82,255,255,186,0,0,0,0,0,3,254,
++255,74,0,0,0,0,0,45,255,216,1,0,0,0,0,0,157,255,106,0,0,0,0,0,0,169,214,10,0,0,0,0,
++0,0,0,0,0,0,0,0,0,41,203,212,212,212,212,177,2,29,167,176,176,205,255,218,2,0,0,0,8,203,246,48,
++0,0,0,0,160,255,90,0,0,0,0,108,255,141,0,0,0,0,60,250,189,3,0,0,0,17,231,255,148,128,128,118,
++13,41,246,255,255,255,255,245,44,0,0,0,35,71,52,0,0,0,91,254,255,255,23,0,0,175,255,141,42,0,0,0,
++184,255,72,0,0,0,0,184,255,72,0,0,0,0,184,255,72,0,0,0,15,223,255,42,0,0,73,250,254,136,0,0,
++0,32,163,253,217,9,0,0,0,0,196,255,61,0,0,0,0,184,255,72,0,0,0,0,184,255,72,0,0,0,0,183,
++255,75,0,0,0,0,154,255,211,145,7,0,0,31,183,222,205,15,0,26,78,3,0,0,161,255,71,0,0,176,255,80,
++0,0,176,255,80,0,0,176,255,80,0,0,176,255,80,0,0,176,255,80,0,0,176,255,80,0,0,176,255,80,0,0,
++176,255,80,0,0,176,255,80,0,0,176,255,80,0,0,176,255,80,0,0,176,255,80,0,0,121,246,45,0,0,0,1,
++0,0,34,72,44,1,0,0,215,255,255,144,0,0,28,93,255,235,0,0,0,8,255,248,0,0,0,8,255,248,0,0,
++0,8,255,248,0,0,0,0,234,255,46,0,0,0,81,243,255,136,0,0,164,255,192,68,0,3,250,253,7,0,0,8,
++255,248,0,0,0,8,255,248,0,0,0,12,255,247,0,0,113,188,255,221,0,0,165,224,204,71,0,0,0,50,190,200,
++115,13,0,65,54,0,0,220,187,146,236,238,188,251,103,0,0,53,3,0,10,105,158,98,0,0,0,0,0,0,0,0,
++0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,9,192,193,8,35,255,255,32,
++0,81,81,0,0,67,65,0,0,179,174,0,0,203,195,0,0,225,216,0,0,246,237,0,14,255,254,4,33,255,255,21,
++11,220,215,5,0,0,0,0,0,0,0,0,101,160,0,0,0,0,0,0,0,0,168,240,0,0,0,0,0,0,5,118,
++245,255,195,107,1,0,0,1,185,255,229,172,207,255,38,0,0,87,255,212,13,0,0,21,0,0,0,152,255,114,0,0,
++0,0,0,0,0,165,255,108,0,0,0,0,0,0,0,114,255,194,2,0,0,0,0,0,0,16,227,255,200,134,168,239,
++29,0,0,0,34,182,255,255,241,145,4,0,0,0,0,0,170,249,1,0,0,0,0,0,0,0,117,183,0,0,0,0,
++0,0,0,3,65,103,85,39,0,0,0,0,25,210,255,255,255,255,188,10,0,0,165,255,191,68,72,151,222,28,0,0,
++229,255,44,0,0,0,0,0,0,0,243,255,24,0,0,0,0,0,12,91,255,255,118,96,50,0,0,0,72,254,255,255,
++255,255,186,0,0,0,0,8,248,255,34,12,2,0,0,0,0,0,244,255,24,0,0,0,0,0,0,0,244,255,24,0,
++0,0,0,0,32,166,255,255,183,176,176,176,143,0,62,246,255,255,255,255,255,255,221,6,4,19,0,0,0,0,0,0,
++25,0,68,237,80,159,214,196,110,151,217,0,0,151,255,252,197,224,255,252,50,0,0,187,248,66,0,3,172,255,72,0,
++5,251,168,0,0,0,29,255,141,0,8,253,160,0,0,0,20,255,146,0,0,202,240,40,0,0,140,255,87,0,0,135,
++255,236,156,185,255,251,27,0,58,246,120,200,251,237,149,171,199,0,15,48,0,0,3,0,0,4,56,0,21,80,1,0,
++0,0,0,27,78,0,125,255,122,0,0,0,9,216,255,27,25,236,250,47,0,0,145,255,162,0,0,84,255,208,5,62,
++254,225,15,0,0,0,162,255,142,221,253,64,0,0,0,87,131,255,255,255,226,115,41,0,1,215,244,246,255,253,244,243,
++118,0,0,0,0,56,255,212,0,0,0,0,1,213,244,246,255,253,244,243,117,0,0,89,116,146,255,231,116,115,42,0,
++0,0,0,56,255,212,0,0,0,0,0,0,0,22,249,180,0,0,0,0,0,0,0,0,16,5,0,0,0,0,0,26,
++78,3,0,0,161,255,71,0,0,176,255,80,0,0,176,255,80,0,0,176,255,80,0,0,144,255,57,0,0,2,27,0,
++0,0,0,0,0,0,0,0,0,0,0,0,55,135,12,0,0,168,255,76,0,0,176,255,80,0,0,176,255,80,0,0,
++176,255,80,0,0,119,243,44,0,0,0,0,0,0,0,0,2,60,103,93,54,0,0,0,19,200,255,255,255,255,214,7,
++0,146,255,142,13,17,80,135,2,0,190,255,56,0,0,0,0,0,0,159,255,184,28,0,0,0,0,11,222,255,255,250,
++160,42,0,0,88,255,103,87,209,255,253,137,0,91,255,161,0,0,74,227,255,79,21,233,255,192,67,0,81,255,132,0,
++34,179,255,255,201,150,255,90,0,0,0,45,160,252,255,208,2,0,0,0,0,0,75,255,203,0,0,0,0,0,0,28,
++255,216,0,8,228,183,121,113,205,255,123,0,0,114,211,249,255,223,118,1,0,0,0,0,0,5,0,0,0,0,0,11,
++103,26,8,102,27,0,0,92,255,136,74,255,135,0,0,16,109,31,12,109,31,0,0,0,0,0,0,0,0,0,0,0,
++0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
++0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
++0,0,22,84,105,86,25,0,0,0,0,0,0,11,152,210,135,110,133,207,160,14,0,0,0,9,198,112,2,0,10,4,
++1,102,203,12,0,0,137,127,0,75,216,254,250,170,4,116,145,0,6,225,8,45,250,211,85,91,157,7,6,224,9,51,
++178,0,134,255,53,0,0,0,0,0,171,58,65,162,0,156,255,21,0,0,0,0,0,154,73,39,193,0,115,255,86,0,
++0,0,0,0,185,46,0,217,28,14,227,246,158,159,217,10,23,221,1,0,94,178,2,22,144,193,182,94,1,168,103,0,
++0,0,142,182,33,0,0,0,29,173,154,0,0,0,0,0,82,201,205,181,203,204,89,0,0,0,0,0,0,0,0,14,
++34,15,0,0,0,0,0,1,68,104,74,7,49,184,143,218,164,0,60,99,186,229,120,217,84,162,236,121,229,121,192,234,
++3,86,95,24,82,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
++0,0,0,0,0,21,16,0,4,33,0,0,11,225,165,0,157,243,1,0,139,255,86,60,254,166,0,11,249,226,2,181,
++255,53,0,0,210,251,30,130,255,106,0,0,58,254,142,10,221,221,0,0,0,114,98,0,58,153,0,0,0,0,0,0,
++0,0,0,29,221,232,232,232,232,232,231,125,0,8,117,128,128,128,128,128,226,180,0,0,0,0,0,0,0,0,196,180,
++0,0,0,0,0,0,0,0,196,180,0,0,0,0,0,0,0,0,138,125,0,0,0,0,0,0,0,0,0,0,0,0,
++0,0,0,0,0,0,0,0,0,0,0,0,0,22,84,105,86,25,0,0,0,0,0,0,11,152,210,135,110,133,207,160,
++14,0,0,0,9,198,112,3,12,11,1,1,102,203,12,0,0,137,127,0,197,255,255,247,144,0,116,145,0,6,225,8,
++0,244,156,28,109,255,56,6,224,9,51,178,0,0,244,145,4,86,255,50,0,171,58,65,162,0,0,244,255,255,255,123,
++0,0,154,73,39,193,0,0,244,168,54,232,154,0,0,185,46,0,217,28,0,244,148,0,142,242,8,23,221,1,0,94,
++178,2,161,85,0,43,187,18,168,103,0,0,0,142,182,33,0,0,0,29,173,154,0,0,0,0,0,82,201,205,181,203,
++204,89,0,0,0,0,0,0,0,0,14,34,15,0,0,0,0,0,0,0,10,12,12,12,2,0,0,77,255,255,255,255,
++176,0,0,2,34,36,36,36,13,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
++0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
++0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,11,90,94,15,0,13,204,220,214,214,20,99,228,
++7,3,216,114,102,224,3,1,211,117,17,214,203,196,224,25,0,18,107,111,24,0,0,0,0,0,0,0,0,0,0,0,
++0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,111,50,
++0,0,0,0,0,0,0,0,239,135,0,0,0,0,0,9,16,16,241,143,16,16,3,0,34,251,255,255,255,255,255,255,
++181,0,3,77,88,88,245,177,88,88,44,0,0,0,0,0,240,136,0,0,0,0,0,0,0,0,178,88,0,0,0,0,
++5,93,104,104,104,104,104,104,56,0,32,245,255,255,255,255,255,255,173,0,17,138,197,183,75,0,82,197,142,231,252,26,
++0,0,0,152,255,30,0,0,34,239,182,0,0,25,220,205,15,0,12,211,249,107,87,30,40,245,255,255,255,125,0,0,
++0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,18,137,196,193,
++97,0,80,194,139,205,255,44,0,0,21,126,253,37,0,116,255,255,166,0,0,15,67,121,255,79,70,134,72,134,255,100,
++56,210,255,247,163,10,0,0,8,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
++0,0,0,0,0,0,0,76,10,0,0,0,90,255,82,0,0,2,216,200,3,0,0,74,245,38,0,0,0,10,40,0,
++0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
++0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,140,213,20,0,0,89,221,62,0,0,203,255,51,
++0,0,143,255,111,0,0,204,255,52,0,0,144,255,112,0,0,204,255,52,0,0,144,255,112,0,0,204,255,52,0,0,
++147,255,112,0,0,204,255,73,0,0,203,255,112,0,0,204,255,214,122,183,247,255,112,0,0,204,255,221,255,214,120,255,
++84,0,0,204,255,26,27,3,0,16,0,0,0,204,255,35,0,0,0,0,0,0,0,145,236,17,0,0,0,0,0,0,
++0,0,0,0,0,0,0,0,0,0,0,0,8,57,71,72,72,70,15,0,0,79,239,255,255,255,255,255,181,0,22,245,
++255,255,255,132,36,187,196,0,90,255,255,255,255,112,0,176,196,0,96,255,255,255,255,112,0,176,196,0,37,254,255,255,
++255,112,0,176,196,0,0,121,254,255,255,112,0,176,196,0,0,0,46,112,255,112,0,176,196,0,0,0,0,4,255,112,
++0,176,196,0,0,0,0,4,255,112,0,176,196,0,0,0,0,4,255,112,0,176,196,0,0,0,0,4,255,112,0,176,
++196,0,0,0,0,4,255,112,0,176,196,0,0,0,0,4,255,112,0,176,196,0,0,0,0,1,223,82,0,143,163,0,
++0,0,0,0,0,0,0,0,0,0,0,77,77,0,35,255,255,31,9,189,189,8,0,0,0,0,0,0,0,0,0,0,
++0,0,0,0,34,51,0,0,0,0,0,133,207,50,0,0,0,0,50,114,250,18,0,0,65,232,236,192,3,0,0,0,
++15,22,0,0,0,0,5,111,197,31,0,2,208,255,255,64,0,0,107,124,255,64,0,0,0,88,255,64,0,0,0,88,
++255,64,0,0,64,145,255,129,27,0,228,255,255,255,116,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
++0,0,0,0,0,0,0,0,0,0,0,0,0,0,29,101,84,7,0,49,236,164,203,190,5,162,182,0,20,255,69,161,
++183,0,21,255,69,50,238,164,203,192,5,0,32,105,89,8,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
++0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,35,1,0,20,17,0,0,15,252,132,
++0,187,208,4,0,0,192,249,40,112,255,114,0,0,75,255,156,9,241,236,0,0,130,255,106,50,255,186,0,6,239,206,
++3,165,249,40,0,7,162,45,0,115,99,0,0,0,0,0,0,0,0,0,0,0,5,111,197,31,0,0,0,0,0,105,
++33,0,0,0,2,208,255,255,64,0,0,0,0,78,255,91,0,0,0,0,107,124,255,64,0,0,0,6,219,212,3,0,
++0,0,0,0,88,255,64,0,0,0,118,255,68,0,0,0,0,0,0,88,255,64,0,0,23,242,175,0,0,0,0,0,
++0,64,145,255,129,27,0,158,248,34,0,45,193,64,0,0,228,255,255,255,116,51,253,135,0,8,217,255,123,0,0,0,
++0,0,0,0,196,230,12,0,142,235,255,124,0,0,0,0,0,0,90,255,95,0,65,247,73,255,124,0,0,0,0,0,
++10,227,201,1,7,224,216,138,255,186,27,0,0,0,0,130,254,56,0,14,201,220,223,255,236,68,0,0,0,0,230,162,
++0,0,0,0,0,12,240,96,0,0,0,0,0,38,10,0,0,0,0,0,0,2,0,0,0,5,111,197,31,0,0,0,
++0,0,105,33,0,0,0,2,208,255,255,64,0,0,0,0,78,255,91,0,0,0,0,107,124,255,64,0,0,0,6,219,
++212,3,0,0,0,0,0,88,255,64,0,0,0,118,255,68,0,0,0,0,0,0,88,255,64,0,0,23,242,175,0,0,
++0,0,0,0,64,145,255,129,27,0,158,248,35,106,187,195,120,1,0,228,255,255,255,116,51,253,135,23,209,146,202,255,
++95,0,0,0,0,0,0,196,230,12,0,0,0,80,255,102,0,0,0,0,0,90,255,95,0,0,0,5,196,233,21,0,
++0,0,0,10,227,201,1,0,0,3,170,241,52,0,0,0,0,0,130,254,56,0,0,0,152,255,146,88,54,0,0,0,
++0,230,162,0,0,0,0,213,255,255,255,197,0,0,0,0,38,10,0,0,0,0,0,0,0,0,0,18,137,196,193,97,
++0,0,0,0,0,105,33,0,0,0,80,194,139,205,255,44,0,0,0,78,255,91,0,0,0,0,0,21,126,253,37,0,
++0,6,219,212,3,0,0,0,0,116,255,255,166,0,0,0,118,255,68,0,0,0,0,0,15,67,121,255,79,0,23,242,
++175,0,0,0,0,0,70,134,72,134,255,100,0,158,248,34,0,45,193,64,0,56,210,255,247,163,10,51,253,135,0,8,
++217,255,123,0,0,0,8,3,0,0,196,230,12,0,142,235,255,124,0,0,0,0,0,0,90,255,95,0,65,247,73,255,
++124,0,0,0,0,0,10,227,201,1,7,224,216,138,255,186,27,0,0,0,0,130,254,56,0,14,201,220,223,255,236,68,
++0,0,0,0,230,162,0,0,0,0,0,12,240,96,0,0,0,0,0,38,10,0,0,0,0,0,0,2,0,0,0,0,
++32,209,158,0,0,0,0,0,80,255,243,0,0,0,0,0,4,99,60,0,0,0,0,0,0,95,31,0,0,0,0,0,
++24,249,92,0,0,0,0,11,192,243,20,0,0,0,10,197,252,79,0,0,0,0,131,255,133,0,0,0,0,0,183,255,
++99,0,0,25,86,6,127,255,247,186,199,250,255,51,4,134,232,255,238,183,74,0,0,0,0,5,0,0,0,0,0,0,
++0,4,27,0,0,0,0,0,0,0,0,0,0,115,247,45,0,0,0,0,0,0,0,0,0,16,210,207,5,0,0,0,
++0,0,0,0,0,0,25,193,32,0,0,0,0,0,0,0,0,0,0,62,53,0,0,0,0,0,0,0,0,0,58,255,
++252,41,0,0,0,0,0,0,0,0,177,255,255,157,0,0,0,0,0,0,0,38,254,179,203,248,23,0,0,0,0,0,
++0,152,255,71,96,255,132,0,0,0,0,0,20,246,219,1,8,235,237,10,0,0,0,0,127,255,113,0,0,135,255,108,
++0,0,0,8,233,255,76,60,60,90,255,221,2,0,0,101,255,255,255,255,255,255,255,255,84,0,1,215,255,138,100,100,
++100,100,157,255,199,0,74,255,188,0,0,0,0,0,0,209,255,58,115,253,69,0,0,0,0,0,0,84,254,103,0,13,
++0,0,0,0,0,0,0,0,14,0,0,0,0,0,0,0,0,28,2,0,0,0,0,0,0,0,0,0,54,250,103,0,
++0,0,0,0,0,0,0,9,216,204,13,0,0,0,0,0,0,0,0,42,190,20,0,0,0,0,0,0,0,0,0,62,
++53,0,0,0,0,0,0,0,0,0,58,255,252,41,0,0,0,0,0,0,0,0,177,255,255,157,0,0,0,0,0,0,
++0,38,254,179,203,248,23,0,0,0,0,0,0,152,255,71,96,255,132,0,0,0,0,0,20,246,219,1,8,235,237,10,
++0,0,0,0,127,255,113,0,0,135,255,108,0,0,0,8,233,255,76,60,60,90,255,221,2,0,0,101,255,255,255,255,
++255,255,255,255,84,0,1,215,255,138,100,100,100,100,157,255,199,0,74,255,188,0,0,0,0,0,0,209,255,58,115,253,
++69,0,0,0,0,0,0,84,254,103,0,13,0,0,0,0,0,0,0,0,14,0,0,0,0,0,0,25,22,0,0,0,
++0,0,0,0,0,0,65,248,244,56,0,0,0,0,0,0,0,19,229,158,172,222,13,0,0,0,0,0,0,80,170,5,
++8,178,68,0,0,0,0,0,0,0,0,62,53,0,0,0,0,0,0,0,0,0,58,255,252,41,0,0,0,0,0,0,
++0,0,177,255,255,157,0,0,0,0,0,0,0,38,254,179,203,248,23,0,0,0,0,0,0,152,255,71,96,255,132,0,
++0,0,0,0,20,246,219,1,8,235,237,10,0,0,0,0,127,255,113,0,0,135,255,108,0,0,0,8,233,255,76,60,
++60,90,255,221,2,0,0,101,255,255,255,255,255,255,255,255,84,0,1,215,255,138,100,100,100,100,157,255,199,0,74,255,
++188,0,0,0,0,0,0,209,255,58,115,253,69,0,0,0,0,0,0,84,254,103,0,13,0,0,0,0,0,0,0,0,
++14,0,0,0,0,115,188,137,23,0,128,86,0,0,0,0,78,238,154,221,246,206,247,42,0,0,0,0,78,78,0,6,
++93,136,59,0,0,0,0,0,0,0,0,62,53,0,0,0,0,0,0,0,0,0,58,255,252,41,0,0,0,0,0,0,
++0,0,177,255,255,157,0,0,0,0,0,0,0,38,254,179,203,248,23,0,0,0,0,0,0,152,255,71,96,255,132,0,
++0,0,0,0,20,246,219,1,8,235,237,10,0,0,0,0,127,255,113,0,0,135,255,108,0,0,0,8,233,255,76,60,
++60,90,255,221,2,0,0,101,255,255,255,255,255,255,255,255,84,0,1,215,255,138,100,100,100,100,157,255,199,0,74,255,
++188,0,0,0,0,0,0,209,255,58,115,253,69,0,0,0,0,0,0,84,254,103,0,13,0,0,0,0,0,0,0,0,
++14,0,0,0,0,31,128,23,26,128,24,0,0,0,0,0,0,124,255,104,105,255,101,0,0,0,0,0,0,17,86,12,
++15,86,13,0,0,0,0,0,0,0,0,62,53,0,0,0,0,0,0,0,0,0,58,255,252,41,0,0,0,0,0,0,
++0,0,177,255,255,157,0,0,0,0,0,0,0,38,254,179,203,248,23,0,0,0,0,0,0,152,255,71,96,255,132,0,
++0,0,0,0,20,246,219,1,8,235,237,10,0,0,0,0,127,255,113,0,0,135,255,108,0,0,0,8,233,255,76,60,
++60,90,255,221,2,0,0,101,255,255,255,255,255,255,255,255,84,0,1,215,255,138,100,100,100,100,157,255,199,0,74,255,
++188,0,0,0,0,0,0,209,255,58,115,253,69,0,0,0,0,0,0,84,254,103,0,13,0,0,0,0,0,0,0,0,
++14,0,0,0,0,0,83,227,225,71,0,0,0,0,0,0,0,2,238,28,39,230,0,0,0,0,0,0,0,1,234,42,
++54,223,0,0,0,0,0,0,0,0,67,214,211,56,0,0,0,0,0,0,0,0,0,62,53,0,0,0,0,0,0,0,
++0,0,58,255,252,41,0,0,0,0,0,0,0,0,177,255,255,157,0,0,0,0,0,0,0,38,254,179,203,248,23,0,
++0,0,0,0,0,152,255,71,96,255,132,0,0,0,0,0,20,246,219,1,8,235,237,10,0,0,0,0,127,255,113,0,
++0,135,255,108,0,0,0,8,233,255,76,60,60,90,255,221,2,0,0,101,255,255,255,255,255,255,255,255,84,0,1,215,
++255,138,100,100,100,100,157,255,199,0,74,255,188,0,0,0,0,0,0,209,255,58,115,253,69,0,0,0,0,0,0,84,
++254,103,0,13,0,0,0,0,0,0,0,0,14,0,0,0,0,0,0,0,0,29,71,72,72,72,72,72,72,52,0,0,
++0,0,0,0,0,28,239,255,255,255,255,255,255,255,255,24,0,0,0,0,0,0,174,255,255,246,92,92,92,92,92,72,
++0,0,0,0,0,0,76,255,163,239,228,0,0,0,0,0,0,0,0,0,0,0,11,224,241,24,185,255,27,0,0,0,
++0,0,0,0,0,0,0,139,255,114,0,130,255,204,140,140,140,140,74,0,0,0,0,46,251,213,4,0,74,255,255,255,
++255,255,255,184,0,0,0,1,198,255,126,60,60,78,255,214,24,24,24,24,3,0,0,0,103,255,255,255,255,255,255,255,
++245,4,0,0,0,0,0,0,23,239,253,124,100,100,100,100,230,255,50,0,0,0,0,0,0,164,255,124,0,0,0,0,
++0,109,255,233,160,160,160,141,4,1,239,211,8,0,0,0,0,0,34,237,255,255,255,255,237,19,0,11,4,0,0,0,
++0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,33,89,104,76,23,0,0,0,0,25,180,255,255,255,255,250,161,
++5,0,16,220,255,232,139,107,133,219,254,29,0,139,255,218,21,0,0,0,1,26,0,0,229,255,90,0,0,0,0,0,
++0,0,19,255,255,30,0,0,0,0,0,0,0,29,255,255,17,0,0,0,0,0,0,0,7,255,255,42,0,0,0,0,
++0,0,0,0,205,255,120,0,0,0,0,0,0,0,0,100,255,243,66,0,0,0,34,96,3,0,0,170,255,255,209,179,
++202,253,255,41,0,0,1,110,217,255,255,253,203,85,0,0,0,0,0,0,138,244,59,0,0,0,0,0,0,0,0,48,
++109,252,24,0,0,0,0,0,0,57,232,235,197,6,0,0,0,0,0,0,0,14,23,0,0,0,0,0,0,0,31,0,
++0,0,0,0,0,0,0,43,255,109,0,0,0,0,0,0,0,0,154,246,39,0,0,0,0,0,0,0,3,158,89,0,
++0,0,0,0,17,69,72,72,72,72,72,29,0,0,176,255,255,255,255,255,255,196,0,0,196,255,125,92,92,92,92,42,
++0,0,196,255,52,0,0,0,0,0,0,0,196,255,52,0,0,0,0,0,0,0,196,255,163,140,140,140,135,33,0,0,
++196,255,255,255,255,255,255,100,0,0,196,255,71,24,24,24,19,0,0,0,196,255,52,0,0,0,0,0,0,0,196,255,
++52,0,0,0,0,0,0,0,195,255,179,160,160,160,160,94,0,0,138,254,255,255,255,255,255,174,0,0,0,0,0,0,
++0,17,14,0,0,0,0,0,0,0,12,220,175,0,0,0,0,0,0,0,154,240,48,0,0,0,0,0,0,0,191,61,
++0,0,0,0,17,69,72,72,72,72,72,29,0,0,176,255,255,255,255,255,255,196,0,0,196,255,125,92,92,92,92,42,
++0,0,196,255,52,0,0,0,0,0,0,0,196,255,52,0,0,0,0,0,0,0,196,255,163,140,140,140,135,33,0,0,
++196,255,255,255,255,255,255,100,0,0,196,255,71,24,24,24,19,0,0,0,196,255,52,0,0,0,0,0,0,0,196,255,
++52,0,0,0,0,0,0,0,195,255,179,160,160,160,160,94,0,0,138,254,255,255,255,255,255,174,0,0,0,0,0,11,
++36,0,0,0,0,0,0,0,19,222,255,117,0,0,0,0,0,0,176,214,116,251,56,0,0,0,0,22,200,33,0,124,
++130,0,0,0,17,69,72,72,72,72,72,29,0,0,176,255,255,255,255,255,255,196,0,0,196,255,125,92,92,92,92,42,
++0,0,196,255,52,0,0,0,0,0,0,0,196,255,52,0,0,0,0,0,0,0,196,255,163,140,140,140,135,33,0,0,
++196,255,255,255,255,255,255,100,0,0,196,255,71,24,24,24,19,0,0,0,196,255,52,0,0,0,0,0,0,0,196,255,
++52,0,0,0,0,0,0,0,195,255,179,160,160,160,160,94,0,0,138,254,255,255,255,255,255,174,0,0,0,5,120,56,
++1,119,59,0,0,0,0,52,255,176,33,255,173,0,0,0,0,1,80,32,0,79,34,0,0,0,17,69,72,72,72,72,
++72,29,0,0,176,255,255,255,255,255,255,196,0,0,196,255,125,92,92,92,92,42,0,0,196,255,52,0,0,0,0,0,
++0,0,196,255,52,0,0,0,0,0,0,0,196,255,163,140,140,140,135,33,0,0,196,255,255,255,255,255,255,100,0,0,
++196,255,71,24,24,24,19,0,0,0,196,255,52,0,0,0,0,0,0,0,196,255,52,0,0,0,0,0,0,0,195,255,
++179,160,160,160,160,94,0,0,138,254,255,255,255,255,255,174,0,0,31,0,0,0,0,43,255,109,0,0,0,0,154,246,
++39,0,0,0,3,158,89,0,0,0,0,36,85,1,0,0,0,185,255,61,0,0,0,196,255,72,0,0,0,196,255,72,
++0,0,0,196,255,72,0,0,0,196,255,72,0,0,0,196,255,72,0,0,0,196,255,72,0,0,0,196,255,72,0,0,
++0,196,255,72,0,0,0,196,255,72,0,0,0,162,251,42,0,0,0,3,17,0,0,0,0,0,17,14,0,0,12,220,
++175,0,0,154,240,48,0,0,191,61,0,0,36,85,1,0,0,185,255,61,0,0,196,255,72,0,0,196,255,72,0,0,
++196,255,72,0,0,196,255,72,0,0,196,255,72,0,0,196,255,72,0,0,196,255,72,0,0,196,255,72,0,0,196,255,
++72,0,0,162,251,42,0,0,3,17,0,0,0,0,11,36,0,0,0,19,222,255,117,0,0,176,214,116,251,56,22,200,
++33,0,124,130,0,0,36,85,1,0,0,0,185,255,61,0,0,0,196,255,72,0,0,0,196,255,72,0,0,0,196,255,
++72,0,0,0,196,255,72,0,0,0,196,255,72,0,0,0,196,255,72,0,0,0,196,255,72,0,0,0,196,255,72,0,
++0,0,196,255,72,0,0,0,162,251,42,0,0,0,3,17,0,0,5,120,56,1,119,59,52,255,176,33,255,173,1,80,
++32,0,79,34,0,0,36,85,1,0,0,0,185,255,61,0,0,0,196,255,72,0,0,0,196,255,72,0,0,0,196,255,
++72,0,0,0,196,255,72,0,0,0,196,255,72,0,0,0,196,255,72,0,0,0,196,255,72,0,0,0,196,255,72,0,
++0,0,196,255,72,0,0,0,162,251,42,0,0,0,3,17,0,0,0,0,17,69,72,72,68,51,9,0,0,0,0,0,
++0,176,255,255,255,255,255,250,168,29,0,0,0,0,196,255,149,108,117,152,232,255,235,36,0,0,0,196,255,72,0,0,
++0,15,183,255,187,0,0,0,196,255,72,0,0,0,0,31,255,255,25,7,107,255,255,192,120,115,24,0,0,223,255,71,
++39,249,255,255,255,255,254,84,0,0,212,255,82,0,6,208,255,84,12,9,0,0,1,245,255,62,0,0,196,255,72,0,
++0,0,0,73,255,248,11,0,0,196,255,72,0,0,0,59,224,255,146,0,0,0,195,255,201,180,188,221,254,255,187,9,
++0,0,0,138,254,255,255,253,235,186,94,2,0,0,0,0,0,112,188,139,24,0,125,90,0,0,0,0,74,239,154,220,
++246,205,247,45,0,0,0,0,75,81,0,5,92,137,61,0,0,0,0,39,68,0,0,0,0,0,0,79,36,0,0,180,
++255,92,0,0,0,0,29,255,173,0,0,196,255,245,44,0,0,0,44,255,188,0,0,196,255,255,217,13,0,0,44,255,
++188,0,0,196,255,176,255,172,0,0,44,255,188,0,0,196,255,40,194,255,113,0,44,255,188,0,0,196,255,36,26,232,
++251,59,44,255,188,0,0,196,255,36,0,65,252,229,66,255,188,0,0,196,255,36,0,0,121,255,234,255,188,0,0,196,
++255,36,0,0,1,179,255,255,188,0,0,196,255,36,0,0,0,17,222,255,188,0,0,158,242,12,0,0,0,0,50,242,
++154,0,0,1,9,0,0,0,0,0,0,11,2,0,0,0,0,0,31,0,0,0,0,0,0,0,0,0,0,0,39,255,
++113,0,0,0,0,0,0,0,0,0,0,0,151,247,41,0,0,0,0,0,0,0,0,0,0,2,156,93,0,0,0,0,
++0,0,0,0,0,0,40,93,103,74,11,0,0,0,0,0,0,26,186,255,255,255,255,240,113,0,0,0,0,16,220,255,
++212,110,87,138,245,255,125,0,0,0,139,255,205,10,0,0,0,69,255,251,32,0,0,229,255,80,0,0,0,0,0,192,
++255,120,0,19,255,255,22,0,0,0,0,0,140,255,162,0,29,255,255,11,0,0,0,0,0,118,255,177,0,7,255,255,
++40,0,0,0,0,0,142,255,156,0,0,204,255,117,0,0,0,0,2,215,255,97,0,0,98,255,236,41,0,0,0,132,
++255,233,10,0,0,0,169,255,248,178,161,214,255,248,69,0,0,0,0,1,111,221,255,255,251,185,51,0,0,0,0,0,
++0,0,0,17,33,10,0,0,0,0,0,0,0,0,0,0,0,0,16,15,0,0,0,0,0,0,0,0,0,0,11,218,
++179,0,0,0,0,0,0,0,0,0,0,150,242,51,0,0,0,0,0,0,0,0,0,0,188,64,0,0,0,0,0,0,
++0,0,0,40,93,103,74,11,0,0,0,0,0,0,26,186,255,255,255,255,240,113,0,0,0,0,16,220,255,212,110,87,
++138,245,255,125,0,0,0,139,255,205,10,0,0,0,69,255,251,32,0,0,229,255,80,0,0,0,0,0,192,255,120,0,
++19,255,255,22,0,0,0,0,0,140,255,162,0,29,255,255,11,0,0,0,0,0,118,255,177,0,7,255,255,40,0,0,
++0,0,0,142,255,156,0,0,204,255,117,0,0,0,0,2,215,255,97,0,0,98,255,236,41,0,0,0,132,255,233,10,
++0,0,0,169,255,248,178,161,214,255,248,69,0,0,0,0,1,111,221,255,255,251,185,51,0,0,0,0,0,0,0,0,
++17,33,10,0,0,0,0,0,0,0,0,0,0,11,36,0,0,0,0,0,0,0,0,0,0,18,220,255,121,0,0,0,
++0,0,0,0,0,0,172,216,114,252,59,0,0,0,0,0,0,0,19,201,35,0,121,134,0,0,0,0,0,0,0,0,
++40,93,103,74,11,0,0,0,0,0,0,26,186,255,255,255,255,240,113,0,0,0,0,16,220,255,212,110,87,138,245,255,
++125,0,0,0,139,255,205,10,0,0,0,69,255,251,32,0,0,229,255,80,0,0,0,0,0,192,255,120,0,19,255,255,
++22,0,0,0,0,0,140,255,162,0,29,255,255,11,0,0,0,0,0,118,255,177,0,7,255,255,40,0,0,0,0,0,
++142,255,156,0,0,204,255,117,0,0,0,0,2,215,255,97,0,0,98,255,236,41,0,0,0,132,255,233,10,0,0,0,
++169,255,248,178,161,214,255,248,69,0,0,0,0,1,111,221,255,255,251,185,51,0,0,0,0,0,0,0,0,17,33,10,
++0,0,0,0,0,0,0,0,65,183,163,52,0,64,151,0,0,0,0,0,15,243,166,192,255,207,242,112,0,0,0,0,
++0,28,128,0,0,63,134,96,1,0,0,0,0,0,0,0,40,93,103,74,11,0,0,0,0,0,0,26,186,255,255,255,
++255,240,113,0,0,0,0,16,220,255,212,110,87,138,245,255,125,0,0,0,139,255,205,10,0,0,0,69,255,251,32,0,
++0,229,255,80,0,0,0,0,0,192,255,120,0,19,255,255,22,0,0,0,0,0,140,255,162,0,29,255,255,11,0,0,
++0,0,0,118,255,177,0,7,255,255,40,0,0,0,0,0,142,255,156,0,0,204,255,117,0,0,0,0,2,215,255,97,
++0,0,98,255,236,41,0,0,0,132,255,233,10,0,0,0,169,255,248,178,161,214,255,248,69,0,0,0,0,1,111,221,
++255,255,251,185,51,0,0,0,0,0,0,0,0,17,33,10,0,0,0,0,0,0,0,0,4,119,59,1,118,61,0,0,
++0,0,0,0,0,48,255,180,29,255,177,0,0,0,0,0,0,0,1,79,34,0,78,35,0,0,0,0,0,0,0,0,
++40,93,103,74,11,0,0,0,0,0,0,26,186,255,255,255,255,240,113,0,0,0,0,16,220,255,212,110,87,138,245,255,
++125,0,0,0,139,255,205,10,0,0,0,69,255,251,32,0,0,229,255,80,0,0,0,0,0,192,255,120,0,19,255,255,
++22,0,0,0,0,0,140,255,162,0,29,255,255,11,0,0,0,0,0,118,255,177,0,7,255,255,40,0,0,0,0,0,
++142,255,156,0,0,204,255,117,0,0,0,0,2,215,255,97,0,0,98,255,236,41,0,0,0,132,255,233,10,0,0,0,
++169,255,248,178,161,214,255,248,69,0,0,0,0,1,111,221,255,255,251,185,51,0,0,0,0,0,0,0,0,17,33,10,
++0,0,0,0,0,0,13,6,0,0,0,0,18,0,0,0,180,204,17,0,0,75,248,78,0,0,52,239,204,16,75,248,
++180,6,0,0,0,51,238,213,248,180,7,0,0,0,0,0,113,255,245,23,0,0,0,0,0,71,248,188,238,202,15,0,
++0,0,69,248,177,6,49,237,201,11,0,0,152,173,6,0,0,48,223,55,0,0,0,0,0,0,0,0,0,0,0,0,
++0,0,0,0,0,0,0,0,16,0,0,0,0,0,0,0,40,93,103,74,65,250,72,0,0,0,0,26,186,255,255,255,
++255,255,255,21,0,0,0,16,220,255,212,110,87,227,255,255,125,0,0,0,139,255,205,10,0,10,227,255,255,251,32,0,
++0,229,255,80,0,0,131,255,61,192,255,120,0,19,255,255,22,0,32,247,167,0,140,255,162,0,29,255,255,11,0,174,
++245,29,0,118,255,177,0,7,255,255,40,67,255,124,0,0,142,255,156,0,0,204,255,121,211,223,8,0,2,215,255,97,
++0,0,98,255,255,255,82,0,0,132,255,233,10,0,0,0,191,255,255,178,161,214,255,248,69,0,0,0,0,156,255,255,
++255,255,251,185,51,0,0,0,0,0,142,129,0,17,33,10,0,0,0,0,0,0,0,0,6,24,0,0,0,0,0,0,
++0,0,0,0,127,243,37,0,0,0,0,0,0,0,0,0,21,217,198,3,0,0,0,0,0,0,0,0,0,31,196,23,
++0,0,0,0,0,0,45,80,0,0,0,0,0,6,90,27,0,0,206,255,42,0,0,0,0,86,255,158,0,0,216,255,
++52,0,0,0,0,96,255,168,0,0,216,255,52,0,0,0,0,96,255,168,0,0,216,255,52,0,0,0,0,96,255,168,
++0,0,216,255,52,0,0,0,0,96,255,168,0,0,216,255,52,0,0,0,0,96,255,168,0,0,212,255,58,0,0,0,
++0,103,255,163,0,0,191,255,94,0,0,0,0,139,255,139,0,0,129,255,208,15,0,0,31,237,255,72,0,0,21,230,
++255,231,169,176,242,255,193,2,0,0,0,33,176,249,255,255,240,150,13,0,0,0,0,0,0,7,33,27,3,0,0,0,
++0,0,0,0,0,0,0,0,30,1,0,0,0,0,0,0,0,0,0,64,252,91,0,0,0,0,0,0,0,0,13,224,
++195,9,0,0,0,0,0,0,0,0,51,185,16,0,0,0,0,0,45,80,0,0,0,0,0,6,90,27,0,0,206,255,
++42,0,0,0,0,86,255,158,0,0,216,255,52,0,0,0,0,96,255,168,0,0,216,255,52,0,0,0,0,96,255,168,
++0,0,216,255,52,0,0,0,0,96,255,168,0,0,216,255,52,0,0,0,0,96,255,168,0,0,216,255,52,0,0,0,
++0,96,255,168,0,0,212,255,58,0,0,0,0,103,255,163,0,0,191,255,94,0,0,0,0,139,255,139,0,0,129,255,
++208,15,0,0,31,237,255,72,0,0,21,230,255,231,169,176,242,255,193,2,0,0,0,33,176,249,255,255,240,150,13,0,
++0,0,0,0,0,7,33,27,3,0,0,0,0,0,0,0,0,0,28,19,0,0,0,0,0,0,0,0,0,75,251,241,
++47,0,0,0,0,0,0,0,25,235,148,182,214,9,0,0,0,0,0,0,90,162,3,12,184,58,0,0,0,0,45,80,
++0,0,0,0,0,6,90,27,0,0,206,255,42,0,0,0,0,86,255,158,0,0,216,255,52,0,0,0,0,96,255,168,
++0,0,216,255,52,0,0,0,0,96,255,168,0,0,216,255,52,0,0,0,0,96,255,168,0,0,216,255,52,0,0,0,
++0,96,255,168,0,0,216,255,52,0,0,0,0,96,255,168,0,0,212,255,58,0,0,0,0,103,255,163,0,0,191,255,
++94,0,0,0,0,139,255,139,0,0,129,255,208,15,0,0,31,237,255,72,0,0,21,230,255,231,169,176,242,255,193,2,
++0,0,0,33,176,249,255,255,240,150,13,0,0,0,0,0,0,7,33,27,3,0,0,0,0,0,0,0,37,127,18,32,
++128,19,0,0,0,0,0,0,136,255,92,117,255,89,0,0,0,0,0,0,20,85,9,18,85,10,0,0,0,0,45,80,
++0,0,0,0,0,6,90,27,0,0,206,255,42,0,0,0,0,86,255,158,0,0,216,255,52,0,0,0,0,96,255,168,
++0,0,216,255,52,0,0,0,0,96,255,168,0,0,216,255,52,0,0,0,0,96,255,168,0,0,216,255,52,0,0,0,
++0,96,255,168,0,0,216,255,52,0,0,0,0,96,255,168,0,0,212,255,58,0,0,0,0,103,255,163,0,0,191,255,
++94,0,0,0,0,139,255,139,0,0,129,255,208,15,0,0,31,237,255,72,0,0,21,230,255,231,169,176,242,255,193,2,
++0,0,0,33,176,249,255,255,240,150,13,0,0,0,0,0,0,7,33,27,3,0,0,0,0,0,0,0,0,0,0,29,
++1,0,0,0,0,0,0,0,61,252,95,0,0,0,0,0,0,12,221,198,11,0,0,0,0,0,0,48,187,17,0,0,
++0,28,78,0,0,0,0,0,1,81,24,152,255,130,0,0,0,0,139,255,127,45,247,252,60,0,0,68,254,237,27,0,
++111,255,223,14,18,229,255,83,0,0,1,183,255,161,172,255,157,0,0,0,0,24,234,255,255,219,12,0,0,0,0,0,
++91,255,255,55,0,0,0,0,0,0,20,255,255,0,0,0,0,0,0,0,20,255,248,0,0,0,0,0,0,0,20,255,
++248,0,0,0,0,0,0,0,20,255,248,0,0,0,0,0,0,0,6,236,216,0,0,0,0,0,0,0,0,12,9,0,
++0,0,0,0,24,66,0,0,0,0,0,0,0,0,0,181,255,60,0,0,0,0,0,0,0,0,196,255,143,100,100,86,
++48,0,0,0,0,196,255,255,255,255,255,255,191,24,0,0,196,255,112,56,56,79,195,255,173,0,0,196,255,72,0,0,
++0,22,255,246,0,0,196,255,72,0,0,0,7,253,253,2,0,196,255,72,0,0,12,142,255,201,0,0,196,255,247,244,
++244,255,255,241,60,0,0,196,255,192,168,168,155,117,21,0,0,0,196,255,71,0,0,0,0,0,0,0,0,151,246,37,
++0,0,0,0,0,0,0,0,0,3,0,0,0,0,0,0,0,0,0,0,0,45,98,104,61,0,0,0,0,0,5,170,
++255,255,255,255,181,1,0,0,0,123,255,189,35,21,205,255,50,0,0,0,211,255,48,0,3,207,254,22,0,0,0,240,
++255,14,0,150,255,128,0,0,0,0,244,255,12,77,255,155,0,0,0,0,0,244,255,12,125,255,132,1,0,0,0,0,
++244,255,12,44,242,255,224,128,11,0,0,244,255,12,0,27,130,224,255,193,0,0,244,255,12,0,0,0,5,215,255,13,
++0,244,255,28,230,166,102,120,245,228,1,0,207,233,5,134,237,255,255,219,57,0,0,9,11,0,0,1,25,27,0,0,
++0,0,0,55,32,0,0,0,0,0,0,0,220,208,1,0,0,0,0,0,0,84,255,80,0,0,0,0,0,0,0,165,
++190,0,0,0,0,0,0,0,9,41,0,0,0,0,0,59,168,228,245,217,118,0,0,0,189,230,161,141,220,255,96,0,
++0,7,1,0,0,60,255,175,0,0,14,92,137,156,199,255,195,0,14,225,253,174,139,169,255,196,0,70,255,184,0,0,
++79,255,196,0,35,253,237,85,88,221,255,196,0,0,99,240,255,243,91,239,159,0,0,0,6,31,4,0,14,5,0,0,
++0,0,0,0,37,50,0,0,0,0,0,0,3,218,206,0,0,0,0,0,0,95,255,73,0,0,0,0,0,0,206,152,
++0,0,0,0,0,0,0,44,6,0,0,0,0,59,168,228,245,217,118,0,0,0,189,230,161,141,220,255,96,0,0,7,
++1,0,0,60,255,175,0,0,14,92,137,156,199,255,195,0,14,225,253,174,139,169,255,196,0,70,255,184,0,0,79,255,
++196,0,35,253,237,85,88,221,255,196,0,0,99,240,255,243,91,239,159,0,0,0,6,31,4,0,14,5,0,0,0,0,
++15,81,11,0,0,0,0,0,0,186,255,173,0,0,0,0,0,73,251,108,254,58,0,0,0,0,195,133,0,150,178,0,
++0,0,0,45,4,0,7,41,0,0,0,59,168,228,245,217,118,0,0,0,189,230,161,141,220,255,96,0,0,7,1,0,
++0,60,255,175,0,0,14,92,137,156,199,255,195,0,14,225,253,174,139,169,255,196,0,70,255,184,0,0,79,255,196,0,
++35,253,237,85,88,221,255,196,0,0,99,240,255,243,91,239,159,0,0,0,6,31,4,0,14,5,0,0,2,132,181,70,
++0,116,97,0,0,94,232,161,247,205,248,53,0,0,89,71,0,43,138,81,0,0,0,0,0,0,0,0,0,0,0,0,
++59,168,228,245,217,118,0,0,0,189,230,161,141,220,255,96,0,0,7,1,0,0,60,255,175,0,0,14,92,137,156,199,
++255,195,0,14,225,253,174,139,169,255,196,0,70,255,184,0,0,79,255,196,0,35,253,237,85,88,221,255,196,0,0,99,
++240,255,243,91,239,159,0,0,0,6,31,4,0,14,5,0,0,0,74,66,0,71,67,0,0,0,1,251,232,0,234,231,
++0,0,0,0,83,73,0,78,74,0,0,0,0,0,0,0,0,0,0,0,0,59,168,228,245,217,118,0,0,0,189,230,
++161,141,220,255,96,0,0,7,1,0,0,60,255,175,0,0,14,92,137,156,199,255,195,0,14,225,253,174,139,169,255,196,
++0,70,255,184,0,0,79,255,196,0,35,253,237,85,88,221,255,196,0,0,99,240,255,243,91,239,159,0,0,0,6,31,
++4,0,14,5,0,0,0,0,92,159,83,0,0,0,0,0,85,200,76,208,69,0,0,0,0,129,125,0,142,113,0,0,
++0,0,36,220,176,216,27,0,0,0,0,0,16,60,13,0,0,0,0,59,168,228,245,217,118,0,0,0,189,230,161,141,
++220,255,96,0,0,7,1,0,0,60,255,175,0,0,14,92,137,156,199,255,195,0,14,225,253,174,139,169,255,196,0,70,
++255,184,0,0,79,255,196,0,35,253,237,85,88,221,255,196,0,0,99,240,255,243,91,239,159,0,0,0,6,31,4,0,
++14,5,0,0,57,167,227,245,210,87,50,187,242,228,127,4,0,0,185,232,161,141,220,255,255,210,108,138,254,148,0,0,
++7,1,0,0,60,255,252,23,0,0,156,252,18,0,14,91,137,155,199,255,255,164,164,164,213,255,58,14,225,253,174,139,
++169,255,255,132,132,132,132,125,19,70,255,184,0,0,79,255,250,30,0,0,0,0,0,35,253,237,85,87,225,208,255,221,
++117,101,158,230,34,0,95,236,255,255,172,11,90,224,255,255,239,139,4,0,0,4,32,15,0,0,0,1,24,28,3,0,
++0,0,2,104,214,245,223,140,10,0,144,255,235,160,178,251,63,34,253,246,32,0,0,7,0,88,255,186,0,0,0,0,
++0,88,255,182,0,0,0,0,0,41,255,238,15,0,0,0,0,0,179,255,211,116,131,207,37,0,13,156,255,255,254,181,
++17,0,0,0,57,255,93,2,0,0,0,0,20,88,228,97,0,0,0,3,221,225,233,45,0,0,0,0,6,27,4,0,
++0,0,0,48,39,0,0,0,0,0,0,0,200,223,5,0,0,0,0,0,0,66,254,100,0,0,0,0,0,0,0,145,
++210,0,0,0,0,0,0,0,5,45,0,0,0,0,0,0,104,211,244,216,94,0,0,0,137,255,181,104,164,255,101,0,
++26,252,208,1,0,1,200,225,0,84,255,255,156,156,156,225,255,14,88,255,252,140,140,140,140,123,2,41,255,211,2,0,
++0,0,0,0,0,173,255,192,108,107,177,220,0,0,10,147,242,255,255,225,106,0,0,0,0,5,30,22,0,0,0,0,
++0,0,0,0,30,57,0,0,0,0,0,0,0,201,226,0,0,0,0,0,0,75,255,92,0,0,0,0,0,0,186,172,
++0,0,0,0,0,0,0,40,11,0,0,0,0,0,104,211,244,216,94,0,0,0,137,255,181,104,164,255,101,0,26,252,
++208,1,0,1,200,225,0,84,255,255,156,156,156,225,255,14,88,255,252,140,140,140,140,123,2,41,255,211,2,0,0,0,
++0,0,0,173,255,192,108,107,177,220,0,0,10,147,242,255,255,225,106,0,0,0,0,5,30,22,0,0,0,0,0,0,
++10,81,16,0,0,0,0,0,0,167,255,193,0,0,0,0,0,53,253,108,250,78,0,0,0,0,175,153,0,130,198,0,
++0,0,0,41,8,0,4,45,0,0,0,0,104,211,244,216,94,0,0,0,137,255,181,104,164,255,101,0,26,252,208,1,
++0,1,200,225,0,84,255,255,156,156,156,225,255,14,88,255,252,140,140,140,140,123,2,41,255,211,2,0,0,0,0,0,
++0,173,255,192,108,107,177,220,0,0,10,147,242,255,255,225,106,0,0,0,0,5,30,22,0,0,0,0,0,65,75,0,
++62,76,0,0,0,0,232,251,1,214,248,2,0,0,0,73,83,0,68,84,0,0,0,0,0,0,0,0,0,0,0,0,
++0,104,211,244,216,94,0,0,0,137,255,181,104,164,255,101,0,26,252,208,1,0,1,200,225,0,84,255,255,156,156,156,
++225,255,14,88,255,252,140,140,140,140,123,2,41,255,211,2,0,0,0,0,0,0,173,255,192,108,107,177,220,0,0,10,
++147,242,255,255,225,106,0,0,0,0,5,30,22,0,0,0,8,77,1,0,0,76,255,97,0,0,2,194,220,4,0,0,
++33,243,78,0,0,0,39,11,0,0,0,167,195,0,0,0,243,255,11,0,0,244,255,12,0,0,244,255,12,0,0,244,
++255,12,0,0,244,255,12,0,0,244,255,12,0,0,202,229,2,0,0,7,9,0,0,0,0,74,13,0,0,78,255,94,
++0,0,206,209,6,0,62,249,46,0,0,7,43,0,0,0,167,195,0,0,0,243,255,11,0,0,244,255,12,0,0,244,
++255,12,0,0,244,255,12,0,0,244,255,12,0,0,244,255,12,0,0,202,229,2,0,0,7,9,0,0,0,0,51,57,
++0,0,0,48,250,253,64,0,0,185,186,171,201,0,51,244,33,23,238,66,8,41,0,0,37,11,0,0,167,195,0,0,
++0,0,243,255,11,0,0,0,244,255,12,0,0,0,244,255,12,0,0,0,244,255,12,0,0,0,244,255,12,0,0,0,
++244,255,12,0,0,0,202,229,2,0,0,0,7,9,0,0,16,104,20,13,104,21,108,255,120,90,255,119,21,110,25,17,
++110,25,0,0,0,0,0,0,0,0,167,195,0,0,0,0,243,255,11,0,0,0,244,255,12,0,0,0,244,255,12,0,
++0,0,244,255,12,0,0,0,244,255,12,0,0,0,244,255,12,0,0,0,202,229,2,0,0,0,7,9,0,0,0,0,
++56,37,0,0,17,46,0,0,0,213,255,200,157,244,209,0,0,0,59,233,255,255,193,5,0,0,48,254,188,79,172,255,
++99,0,0,0,21,23,40,15,217,236,10,0,30,189,255,255,244,205,255,101,3,212,255,171,85,138,255,255,156,65,255,215,
++2,0,0,161,255,171,92,255,170,0,0,0,120,255,151,59,255,216,2,0,0,176,255,89,1,200,255,183,105,158,255,216,
++7,0,21,169,251,255,253,184,29,0,0,0,0,10,34,14,0,0,0,0,0,93,184,106,1,65,148,0,0,37,247,159,
++232,214,240,110,0,0,48,113,0,20,128,113,1,0,0,0,0,0,0,0,0,0,0,0,175,182,58,198,244,217,84,0,
++0,243,255,236,170,183,255,247,21,0,244,255,92,0,0,197,255,79,0,244,255,18,0,0,161,255,95,0,244,255,12,0,
++0,160,255,96,0,244,255,12,0,0,160,255,96,0,244,255,12,0,0,160,255,96,0,207,236,3,0,0,122,255,66,0,
++9,12,0,0,0,1,20,0,0,0,42,44,0,0,0,0,0,0,0,184,234,11,0,0,0,0,0,0,53,251,116,0,
++0,0,0,0,0,0,129,226,0,0,0,0,0,0,0,3,48,0,0,0,0,0,1,105,215,245,224,141,12,0,0,140,
++255,219,146,202,255,197,4,32,252,238,17,0,3,200,255,83,87,255,174,0,0,0,122,255,139,88,255,172,0,0,0,113,
++255,147,43,255,229,7,0,0,178,255,100,0,182,255,191,103,156,255,216,7,0,15,161,249,255,254,180,30,0,0,0,0,
++9,33,16,0,0,0,0,0,0,0,0,24,62,0,0,0,0,0,0,0,186,240,1,0,0,0,0,0,59,255,108,0,
++0,0,0,0,0,170,187,1,0,0,0,0,0,0,36,15,0,0,0,0,1,105,215,245,224,141,12,0,0,140,255,219,
++146,202,255,197,4,32,252,238,17,0,3,200,255,83,87,255,174,0,0,0,122,255,139,88,255,172,0,0,0,113,255,147,
++43,255,229,7,0,0,178,255,100,0,182,255,191,103,156,255,216,7,0,15,161,249,255,254,180,30,0,0,0,0,9,33,
++16,0,0,0,0,0,0,7,80,21,0,0,0,0,0,0,151,255,207,2,0,0,0,0,40,252,112,245,94,0,0,0,
++0,159,169,0,114,214,0,0,0,0,37,12,0,2,47,0,0,0,1,105,215,245,224,141,12,0,0,140,255,219,146,202,
++255,197,4,32,252,238,17,0,3,200,255,83,87,255,174,0,0,0,122,255,139,88,255,172,0,0,0,113,255,147,43,255,
++229,7,0,0,178,255,100,0,182,255,191,103,156,255,216,7,0,15,161,249,255,254,180,30,0,0,0,0,9,33,16,0,
++0,0,0,0,109,184,92,0,85,128,0,0,58,243,159,239,209,245,86,0,0,64,96,0,28,133,101,0,0,0,0,0,
++0,0,0,0,0,0,0,1,105,215,245,224,141,12,0,0,140,255,219,146,202,255,197,4,32,252,238,17,0,3,200,255,
++83,87,255,174,0,0,0,122,255,139,88,255,172,0,0,0,113,255,147,43,255,229,7,0,0,178,255,100,0,182,255,191,
++103,156,255,216,7,0,15,161,249,255,254,180,30,0,0,0,0,9,33,16,0,0,0,0,0,58,82,0,55,83,0,0,
++0,0,216,255,13,198,254,12,0,0,0,65,91,0,60,92,0,0,0,0,0,0,0,0,0,0,0,0,1,105,215,245,
++224,141,12,0,0,140,255,219,146,202,255,197,4,32,252,238,17,0,3,200,255,83,87,255,174,0,0,0,122,255,139,88,
++255,172,0,0,0,113,255,147,43,255,229,7,0,0,178,255,100,0,182,255,191,103,156,255,216,7,0,15,161,249,255,254,
++180,30,0,0,0,0,9,33,16,0,0,0,0,0,0,2,132,46,0,0,0,0,0,0,0,19,250,118,0,0,0,0,
++0,0,0,0,13,0,0,0,0,0,2,65,76,76,76,76,76,76,36,0,36,255,255,255,255,255,255,255,186,0,0,19,
++28,28,28,28,28,28,7,0,0,0,0,0,52,13,0,0,0,0,0,0,0,21,255,124,0,0,0,0,0,0,0,0,
++84,26,0,0,0,0,0,0,0,0,0,0,83,91,0,0,1,105,215,245,245,255,127,0,0,140,255,219,146,255,255,203,
++4,32,252,238,17,50,255,255,255,83,87,255,174,0,197,178,122,255,139,88,255,172,92,248,35,113,255,147,43,255,241,236,
++133,0,178,255,100,0,182,255,255,115,156,255,216,7,0,49,255,255,255,254,180,30,0,0,72,164,9,33,16,0,0,0,
++0,0,41,46,0,0,0,0,0,0,0,180,236,12,0,0,0,0,0,0,50,250,120,0,0,0,0,0,0,0,125,230,
++0,0,0,0,0,0,0,2,48,0,0,0,0,0,191,182,0,0,0,136,214,22,3,255,251,0,0,0,199,255,55,4,
++255,252,0,0,0,200,255,56,4,255,252,0,0,0,200,255,56,3,255,252,0,0,0,203,255,56,0,247,255,17,0,15,
++242,255,56,0,193,255,183,115,203,255,255,56,0,47,222,255,254,159,155,251,33,0,0,1,30,17,0,3,17,0,0,0,
++0,0,0,23,64,0,0,0,0,0,0,0,182,243,2,0,0,0,0,0,55,255,112,0,0,0,0,0,0,166,190,1,
++0,0,0,0,0,0,34,16,0,0,0,0,191,182,0,0,0,136,214,22,3,255,251,0,0,0,199,255,55,4,255,252,
++0,0,0,200,255,56,4,255,252,0,0,0,200,255,56,3,255,252,0,0,0,203,255,56,0,247,255,17,0,15,242,255,
++56,0,193,255,183,115,203,255,255,56,0,47,222,255,254,159,155,251,33,0,0,1,30,17,0,3,17,0,0,0,0,6,
++80,22,0,0,0,0,0,0,147,255,210,3,0,0,0,0,37,251,113,243,98,0,0,0,0,155,173,0,110,218,0,0,
++0,0,36,13,0,1,47,0,0,0,191,182,0,0,0,136,214,22,3,255,251,0,0,0,199,255,55,4,255,252,0,0,
++0,200,255,56,4,255,252,0,0,0,200,255,56,3,255,252,0,0,0,203,255,56,0,247,255,17,0,15,242,255,56,0,
++193,255,183,115,203,255,255,56,0,47,222,255,254,159,155,251,33,0,0,1,30,17,0,3,17,0,0,0,56,83,0,53,
++85,0,0,0,0,212,255,16,194,255,16,0,0,0,63,93,0,58,94,0,0,0,0,0,0,0,0,0,0,0,0,191,
++182,0,0,0,136,214,22,3,255,251,0,0,0,199,255,55,4,255,252,0,0,0,200,255,56,4,255,252,0,0,0,200,
++255,56,3,255,252,0,0,0,203,255,56,0,247,255,17,0,15,242,255,56,0,193,255,183,115,203,255,255,56,0,47,222,
++255,254,159,155,251,33,0,0,1,30,17,0,3,17,0,0,0,0,0,0,60,27,0,0,0,0,0,0,34,251,142,0,
++0,0,0,0,0,159,238,26,0,0,0,0,0,18,251,88,0,0,0,0,0,0,0,50,0,0,0,0,109,223,42,0,
++0,0,133,212,6,117,255,154,0,0,21,249,230,1,20,247,243,13,0,119,255,123,0,0,157,255,103,1,221,247,20,0,
++0,47,255,206,71,255,155,0,0,0,0,193,255,228,255,43,0,0,0,0,82,255,255,186,0,0,0,0,0,3,254,255,
++74,0,0,0,0,0,45,255,216,1,0,0,0,0,0,157,255,106,0,0,0,0,0,0,169,214,10,0,0,0,0,0,
++0,0,0,0,0,0,0,0,0,56,65,0,0,0,0,0,0,0,0,228,252,6,0,0,0,0,0,0,0,244,255,12,
++0,0,0,0,0,0,0,244,255,12,0,0,0,0,0,0,0,244,255,69,199,243,210,83,0,0,0,244,255,242,159,165,
++252,254,71,0,0,244,255,96,0,0,107,255,188,0,0,244,255,17,0,0,26,255,238,0,0,244,255,16,0,0,17,255,
++241,0,0,244,255,78,0,0,81,255,200,0,0,244,255,236,118,116,235,255,97,0,0,244,255,103,237,255,247,132,1,0,
++0,244,255,12,5,31,9,0,0,0,0,244,255,12,0,0,0,0,0,0,0,184,211,1,0,0,0,0,0,0,0,0,
++0,0,0,0,0,0,0,0,0,3,98,38,1,97,40,0,0,0,60,255,168,42,255,167,0,0,0,6,106,43,3,105,
++44,0,0,0,0,0,0,0,0,0,0,0,109,223,42,0,0,0,133,212,6,117,255,154,0,0,21,249,230,1,20,247,
++243,13,0,119,255,123,0,0,157,255,103,1,221,247,20,0,0,47,255,206,71,255,155,0,0,0,0,193,255,228,255,43,
++0,0,0,0,82,255,255,186,0,0,0,0,0,3,254,255,74,0,0,0,0,0,45,255,216,1,0,0,0,0,0,157,
++255,106,0,0,0,0,0,0,169,214,10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,37,38,0,0,39,37,0,
++0,41,35,0,27,251,250,25,31,251,249,22,37,253,247,16,17,232,232,15,19,234,230,13,24,237,226,9,0,4,4,0,
++0,5,4,0,0,5,4,0,
++};
++static const mpgb_glyph mpgb_g_item[192] = {
++{32,0,0,4,0,4,0},{33,0,-12,4,13,4,0},{34,0,-12,7,12,7,52},{35,0,-12,10,13,10,136},{36,0,-14,10,16,10,266},{37,0,-12,15,13,15,426},{38,0,-12,12,13,12,621},{39,0,-12,4,12,4,777},
++{40,0,-12,6,16,6,825},{41,0,-12,6,16,6,921},{42,0,-12,7,12,7,1017},{43,0,-9,10,9,10,1101},{44,0,-3,4,6,4,1191},{45,0,-6,7,6,7,1215},{46,0,-3,4,4,4,1257},{47,-1,-13,7,15,5,1273},
++{48,0,-12,10,13,10,1378},{49,0,-12,10,12,10,1508},{50,0,-12,10,12,10,1628},{51,0,-12,10,13,10,1748},{52,0,-12,10,13,10,1878},{53,0,-12,10,13,10,2008},{54,0,-12,10,13,10,2138},{55,0,-12,10,13,10,2268},
++{56,0,-12,10,13,10,2398},{57,0,-12,10,13,10,2528},{58,0,-8,4,9,4,2658},{59,0,-8,4,11,4,2694},{60,0,-9,10,9,10,2738},{61,0,-7,10,7,10,2828},{62,0,-9,10,9,10,2898},{63,0,-12,8,13,7,2988},
++{64,0,-12,15,15,15,3092},{65,0,-12,12,13,12,3317},{66,0,-12,11,12,11,3473},{67,0,-12,11,13,11,3605},{68,0,-12,12,12,12,3748},{69,0,-12,10,12,10,3892},{70,0,-12,9,13,9,4012},{71,0,-12,12,13,12,4129},
++{72,0,-12,12,13,12,4285},{73,0,-12,5,13,5,4441},{74,-1,-12,7,13,6,4506},{75,0,-12,11,13,11,4597},{76,0,-12,9,12,9,4740},{77,0,-12,14,13,14,4848},{78,0,-12,12,13,12,5030},{79,0,-12,13,13,13,5186},
++{80,0,-12,10,13,10,5355},{81,0,-12,13,16,13,5485},{82,0,-12,11,13,11,5693},{83,0,-12,10,13,10,5836},{84,-1,-12,11,13,10,5966},{85,0,-12,12,13,12,6109},{86,0,-12,12,13,11,6265},{87,0,-12,18,13,18,6421},
++{88,0,-12,11,13,11,6655},{89,0,-12,10,13,10,6798},{90,0,-12,10,12,10,6928},{91,0,-12,6,15,6,7048},{92,-1,-13,7,15,5,7138},{93,0,-12,6,15,6,7243},{94,0,-11,10,11,10,7333},{95,0,0,8,2,8,7443},
++{96,0,-13,6,13,6,7459},{97,0,-8,9,9,9,7537},{98,0,-12,10,13,10,7618},{99,0,-8,8,9,8,7748},{100,0,-12,10,13,10,7820},{101,0,-8,9,9,9,7950},{102,0,-12,7,13,6,8031},{103,0,-8,10,12,10,8122},
++{104,0,-12,9,13,9,8242},{105,0,-12,4,13,4,8359},{106,-1,-12,5,16,4,8411},{107,0,-12,9,13,9,8491},{108,0,-12,6,13,5,8608},{109,0,-8,14,9,14,8686},{110,0,-8,9,9,9,8812},{111,0,-8,9,9,9,8893},
++{112,0,-8,10,12,10,8974},{113,0,-8,10,12,10,9094},{114,0,-9,7,10,6,9214},{115,0,-8,8,9,8,9284},{116,-1,-11,8,12,6,9356},{117,0,-8,9,9,9,9452},{118,0,-8,9,9,8,9533},{119,0,-8,14,9,14,9614},
++{120,0,-8,9,9,9,9740},{121,0,-8,9,12,8,9821},{122,0,-8,8,8,8,9929},{123,0,-12,7,15,6,9993},{124,0,-12,5,16,5,10098},{125,0,-12,6,15,6,10178},{126,0,-6,10,6,10,10268},{160,0,0,4,0,4,10328},
++{161,0,-8,4,12,4,10328},{162,0,-10,10,12,10,10376},{163,0,-12,10,12,10,10496},{164,0,-9,10,10,10,10616},{165,0,-12,10,13,10,10716},{166,0,-12,5,16,5,10846},{167,0,-12,9,16,9,10926},{168,0,-12,8,12,8,11070},
++{169,0,-12,13,13,13,11166},{170,0,-12,5,12,5,11335},{171,0,-8,8,8,8,11395},{172,0,-7,10,7,10,11459},{173,0,0,0,0,0,11529},{174,0,-12,13,13,13,11529},{175,0,-12,8,12,8,11698},{176,0,-12,6,12,6,11794},
++{177,0,-9,10,9,10,11866},{178,0,-12,6,12,6,11956},{179,0,-12,6,12,6,12028},{180,0,-13,6,13,6,12100},{181,0,-8,10,12,10,12178},{182,0,-12,10,16,10,12298},{183,0,-6,4,6,4,12458},{184,0,-1,7,5,7,12482},
++{185,0,-12,6,12,6,12517},{186,0,-12,6,12,6,12589},{187,0,-8,8,8,8,12661},{188,0,-12,15,13,15,12725},{189,0,-12,15,13,15,12920},{190,0,-12,15,13,15,13115},{191,0,-8,8,12,7,13310},{192,0,-16,12,17,12,13406},
++{193,0,-16,12,17,12,13610},{194,0,-16,12,17,12,13814},{195,0,-15,12,16,12,14018},{196,0,-15,12,16,12,14210},{197,0,-16,12,17,12,14402},{198,-1,-12,17,13,16,14606},{199,0,-12,11,16,11,14827},{200,0,-16,10,16,10,15003},
++{201,0,-16,10,16,10,15163},{202,0,-16,10,16,10,15323},{203,0,-15,10,15,10,15483},{204,-1,-16,6,17,5,15633},{205,0,-16,5,17,5,15735},{206,-1,-16,6,17,5,15820},{207,-1,-15,6,16,5,15922},{208,-1,-12,13,12,12,16018},
++{209,0,-15,12,16,12,16174},{210,0,-16,13,17,13,16366},{211,0,-16,13,17,13,16587},{212,0,-16,13,17,13,16808},{213,0,-15,13,16,13,17029},{214,0,-15,13,16,13,17237},{215,0,-9,10,9,10,17445},{216,0,-13,13,14,13,17535},
++{217,0,-16,12,17,12,17717},{218,0,-16,12,17,12,17921},{219,0,-16,12,17,12,18125},{220,0,-15,12,16,12,18329},{221,0,-16,10,17,10,18521},{222,0,-12,11,13,10,18691},{223,0,-12,11,13,10,18834},{224,0,-13,9,14,9,18977},
++{225,0,-13,9,14,9,19103},{226,0,-13,9,14,9,19229},{227,0,-12,9,13,9,19355},{228,0,-12,9,13,9,19472},{229,0,-13,9,14,9,19589},{230,0,-8,14,9,14,19715},{231,0,-8,8,12,8,19841},{232,0,-13,9,14,9,19937},
++{233,0,-13,9,14,9,20063},{234,0,-13,9,14,9,20189},{235,0,-12,9,13,9,20315},{236,-1,-13,5,14,4,20432},{237,0,-13,5,14,4,20502},{238,-1,-13,6,14,4,20572},{239,-1,-12,6,13,4,20656},{240,0,-12,9,13,9,20734},
++{241,0,-12,9,13,9,20851},{242,0,-13,9,14,9,20968},{243,0,-13,9,14,9,21094},{244,0,-13,9,14,9,21220},{245,0,-12,9,13,9,21346},{246,0,-12,9,13,9,21463},{247,0,-9,10,9,10,21580},{248,0,-9,9,10,9,21670},
++{249,0,-13,9,14,9,21760},{250,0,-13,9,14,9,21886},{251,0,-13,9,14,9,22012},{252,0,-12,9,13,9,22138},{253,0,-13,9,17,8,22255},{254,0,-12,10,16,10,22408},{255,0,-12,9,16,8,22568},{8230,0,-3,12,4,12,22712},
++};
++static const mpgb_font mpgb_font_item = { mpgb_g_item, 192, mpgb_px_item, 17, 6 };
++
++static const uint8_t mpgb_px_hint[11032] = {
++53,187,7,99,255,26,80,255,7,60,243,0,40,223,0,10,137,0,29,121,3,79,242,20,0,2,0,51,186,13,190,39,
++85,253,25,255,64,58,229,1,248,37,9,86,0,92,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
++0,0,0,0,0,128,41,57,113,0,0,0,218,23,131,112,0,51,227,255,224,248,231,18,0,59,186,0,228,14,0,0,
++110,136,23,220,0,0,93,235,220,208,244,165,0,8,221,57,137,141,17,0,0,226,1,161,65,0,0,0,6,0,6,0,
++0,0,0,0,0,6,0,0,0,0,0,26,231,0,0,0,0,59,187,255,169,60,0,47,247,163,100,142,194,0,111,250,
++5,0,0,0,0,53,253,187,110,44,0,0,0,57,158,219,255,173,1,0,0,0,0,90,255,46,81,130,58,42,143,250,
++23,52,193,252,255,215,73,0,0,0,36,243,0,0,0,0,0,1,58,0,0,0,1,144,208,123,0,0,74,156,0,0,
++80,211,38,231,54,6,219,77,0,0,122,162,0,191,93,119,186,0,0,0,85,209,34,233,75,238,64,139,129,14,3,148,
++214,126,158,148,179,154,165,165,0,0,0,50,236,19,242,40,59,225,0,0,0,195,110,0,226,63,86,199,0,0,67,214,
++4,0,95,234,236,74,0,0,7,20,0,0,0,8,10,0,0,7,143,207,169,18,0,0,0,103,229,52,199,125,0,0,
++0,105,226,27,215,97,0,0,0,15,246,255,158,2,147,21,2,184,213,228,173,23,254,19,70,255,25,28,222,226,199,0,
++71,255,68,8,124,255,179,2,2,150,250,255,218,95,225,98,0,0,8,20,0,0,6,2,51,186,3,85,253,3,58,229,
++0,9,86,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,139,62,0,40,253,46,0,132,228,0,0,194,179,0,
++0,220,156,0,0,226,153,0,0,203,172,0,0,153,219,0,0,66,255,32,0,0,192,79,0,0,3,0,77,127,0,0,
++65,250,29,0,4,244,117,0,0,200,175,0,0,175,205,0,0,169,206,0,0,188,183,0,0,232,127,0,46,255,46,0,
++97,172,0,0,1,2,0,0,0,128,36,126,0,31,162,243,158,30,92,203,255,196,89,0,181,104,173,0,0,8,0,8,
++0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,33,162,0,0,0,0,0,52,208,0,0,0,60,163,
++182,238,164,154,3,25,83,118,223,84,75,0,0,0,52,208,0,0,0,0,0,20,112,0,0,0,29,124,1,79,255,37,
++5,202,6,9,47,0,24,125,128,117,2,33,153,156,145,5,0,0,0,0,0,0,0,0,0,0,29,121,3,79,242,20,
++0,2,0,0,0,0,21,22,0,0,0,167,117,0,0,7,242,42,0,0,77,215,0,0,0,159,133,0,0,4,236,50,
++0,0,67,223,0,0,0,149,141,0,0,1,229,58,0,0,7,153,1,0,0,0,51,182,211,146,9,0,14,236,172,95,
++229,140,0,88,250,15,0,110,238,0,126,226,0,0,71,255,15,125,223,0,0,67,255,24,97,246,6,0,97,246,4,22,
++248,119,31,201,172,0,0,101,244,255,205,28,0,0,0,6,18,0,0,0,0,0,63,189,59,0,0,0,142,254,255,92,
++0,0,0,88,48,255,92,0,0,0,0,12,255,92,0,0,0,0,12,255,92,0,0,0,0,12,255,92,0,0,0,23,
++53,255,120,31,0,0,196,255,255,255,240,4,10,122,195,212,152,15,0,62,192,104,109,243,146,0,0,0,0,0,186,175,
++0,0,0,0,22,241,107,0,0,0,11,198,196,6,0,0,6,186,212,20,0,0,1,173,250,68,44,33,0,29,247,255,
++255,255,243,8,9,123,197,203,146,14,0,59,189,104,105,237,144,0,0,0,0,0,182,165,0,0,8,119,158,231,53,0,
++0,15,163,184,240,95,0,0,0,0,0,126,227,0,68,119,38,36,190,212,0,54,201,254,255,221,60,0,0,0,8,19,
++0,0,0,0,0,0,34,192,30,0,0,0,3,202,255,64,0,0,0,123,233,255,64,0,0,48,237,73,255,64,0,7,
++212,102,40,255,64,0,119,255,164,178,255,184,46,56,135,136,154,255,164,35,0,0,0,24,250,45,0,0,0,0,0,6,
++0,0,2,174,192,192,192,127,0,12,255,153,104,104,61,0,12,255,84,0,0,0,0,12,255,208,220,202,50,0,6,232,
++130,70,184,233,8,0,0,0,0,61,255,40,25,139,54,32,157,242,11,16,171,250,255,229,75,0,0,0,3,20,1,0,
++0,0,13,139,209,195,103,0,0,177,215,100,113,183,7,40,255,46,0,0,0,0,84,245,107,226,214,54,0,101,255,167,
++53,168,234,6,74,255,58,0,55,255,32,12,236,145,19,142,237,6,0,66,226,255,235,61,0,0,0,1,19,3,0,0,
++68,191,192,192,192,172,3,30,107,108,108,228,221,0,0,0,0,37,251,94,0,0,0,0,170,213,2,0,0,0,50,254,
++82,0,0,0,0,186,203,0,0,0,0,66,255,70,0,0,0,0,161,186,0,0,0,0,0,6,2,0,0,0,0,0,
++83,183,206,161,37,0,58,255,122,70,193,212,0,86,247,2,0,97,237,0,12,210,183,135,228,118,0,24,209,205,168,235,
++140,0,124,210,0,0,56,255,29,119,233,36,4,113,252,21,14,179,253,255,239,104,0,0,0,10,22,2,0,0,0,83,
++200,203,114,1,0,61,250,119,94,240,112,0,131,212,0,0,160,214,0,107,243,34,13,215,252,1,9,195,253,241,158,245,
++0,0,2,44,15,126,208,0,51,100,29,68,235,104,0,57,219,255,249,134,3,0,0,0,18,7,0,0,0,16,85,0,
++90,255,23,1,23,0,0,0,0,29,121,3,79,242,20,0,2,0,16,85,0,90,255,23,1,23,0,0,0,0,29,124,
++1,79,255,37,5,202,6,9,47,0,0,0,0,3,81,174,15,0,21,121,224,187,78,0,64,255,149,39,0,0,0,32,
++200,222,118,19,0,0,0,0,42,150,234,157,7,0,0,0,0,14,94,7,69,187,188,188,188,178,4,15,59,60,60,60,
++51,0,49,139,140,140,140,130,3,35,107,108,108,108,99,0,0,0,0,0,0,0,0,89,147,40,0,0,0,0,16,122,
++225,188,79,2,0,0,0,3,81,208,255,1,0,0,52,160,234,145,0,56,201,215,109,13,0,0,49,68,1,0,0,0,
++0,63,173,209,169,33,186,136,97,209,201,0,0,0,161,197,0,0,68,243,59,0,0,214,76,0,0,0,147,0,0,0,
++22,122,8,0,0,65,244,33,0,0,0,2,0,0,0,0,13,117,191,213,191,114,7,0,0,32,215,127,31,3,28,124,
++198,10,0,197,89,0,80,110,38,53,120,123,47,210,0,137,210,116,236,150,24,197,93,155,5,246,40,0,174,106,10,212,
++94,151,14,255,8,4,226,66,57,174,51,200,0,192,178,184,210,173,203,60,1,204,70,9,74,37,7,75,36,0,0,40,
++218,116,33,16,51,151,63,0,0,0,18,124,187,199,168,87,2,0,0,0,0,115,158,0,0,0,0,0,20,246,249,63,
++0,0,0,0,127,198,151,179,0,0,0,8,233,91,43,253,40,0,0,102,233,6,0,190,155,0,1,215,255,236,236,255,
++248,23,77,254,76,52,52,55,238,132,155,158,0,0,0,0,110,212,5,1,0,0,0,0,0,8,9,176,192,192,178,125,
++12,0,40,255,115,80,100,231,155,0,40,255,52,0,0,157,191,0,40,255,147,120,140,234,76,0,40,255,173,152,163,236,
++107,0,40,255,52,0,0,115,240,0,40,255,64,16,27,174,218,0,19,240,255,255,249,205,57,0,0,0,91,191,212,179,
++77,0,0,137,252,153,108,153,208,0,32,251,121,0,0,0,0,0,90,255,39,0,0,0,0,0,94,255,32,0,0,0,
++0,0,51,255,90,0,0,0,0,0,0,192,233,86,43,86,153,1,0,17,165,249,255,241,138,0,0,0,0,4,20,1,
++0,0,9,176,192,190,163,109,7,0,40,255,142,106,137,235,214,18,40,255,64,0,0,33,247,131,40,255,64,0,0,0,
++194,190,40,255,64,0,0,0,186,196,40,255,64,0,0,13,236,152,40,255,97,46,74,191,245,41,19,240,255,254,228,173,
++40,0,9,176,192,192,192,180,5,40,255,125,92,92,80,0,40,255,52,0,0,0,0,40,255,154,128,128,88,0,40,255,
++179,160,160,115,0,40,255,52,0,0,0,0,40,255,77,32,32,22,0,19,240,255,255,255,243,6,9,176,192,192,192,170,
++40,255,133,92,92,73,40,255,64,0,0,0,40,255,148,112,112,66,40,255,193,172,172,112,40,255,64,0,0,0,40,255,
++64,0,0,0,23,250,46,0,0,0,0,6,0,0,0,0,0,0,83,187,213,187,105,3,0,130,252,147,99,131,211,37,
++31,250,116,0,0,0,0,0,90,255,32,0,16,48,44,2,94,255,28,0,116,220,250,73,52,255,86,0,0,0,220,80,
++0,194,230,86,33,51,249,80,0,17,160,247,255,254,211,37,0,0,0,3,21,7,0,0,14,192,29,0,0,0,128,107,
++0,40,255,64,0,0,0,192,168,0,40,255,64,0,0,0,192,168,0,40,255,163,132,132,132,225,168,0,40,255,190,168,
++168,168,234,168,0,40,255,64,0,0,0,192,168,0,40,255,64,0,0,0,192,168,0,24,250,46,0,0,0,172,147,0,
++0,6,0,0,0,0,4,2,0,14,192,29,40,255,64,40,255,64,40,255,64,40,255,64,40,255,64,40,255,64,24,250,
++46,0,6,0,0,0,47,186,3,0,0,88,255,16,0,0,88,255,16,0,0,88,255,16,0,0,88,255,16,0,0,89,
++255,14,0,22,170,234,0,17,251,230,84,0,0,10,0,0,0,14,192,29,0,0,127,134,40,255,64,0,139,239,51,40,
++255,64,139,238,51,0,40,255,193,252,50,0,0,40,255,206,252,55,0,0,40,255,66,159,240,52,0,40,255,64,2,161,
++238,50,24,250,46,0,2,159,206,0,6,0,0,0,0,7,12,176,25,0,0,0,0,40,255,64,0,0,0,0,40,255,
++64,0,0,0,0,40,255,64,0,0,0,0,40,255,64,0,0,0,0,40,255,64,0,0,0,0,40,255,103,52,52,37,
++0,20,241,255,255,255,235,2,11,194,43,0,0,0,0,124,119,0,32,255,185,0,0,0,38,251,176,0,32,255,255,67,
++0,0,172,255,176,0,32,255,158,205,1,55,239,167,176,0,32,255,45,226,89,193,119,148,176,0,32,255,36,93,255,226,
++8,148,176,0,32,255,36,1,182,85,0,148,176,0,19,250,23,0,0,0,0,132,160,0,0,6,0,0,0,0,0,2,
++4,0,14,192,37,0,0,0,166,54,40,255,210,10,0,0,236,96,40,255,248,161,0,0,236,96,40,255,84,245,103,0,
++236,96,40,255,40,92,248,52,236,96,40,255,40,0,151,224,254,96,40,255,40,0,7,203,255,96,25,250,25,0,0,32,
++234,81,0,6,0,0,0,0,7,0,0,0,96,194,211,170,53,0,0,0,138,248,133,101,183,250,61,0,32,251,109,0,
++0,1,203,193,0,90,255,31,0,0,0,128,250,1,94,255,28,0,0,0,116,255,4,51,255,85,0,0,0,174,214,0,
++0,192,227,74,33,117,254,88,0,0,18,168,251,255,235,101,0,0,0,0,0,5,21,2,0,0,0,10,177,192,192,180,
++120,8,40,255,133,92,114,236,144,40,255,64,0,0,136,211,40,255,67,4,26,199,180,40,255,255,255,255,209,40,40,255,
++82,24,13,0,0,40,255,64,0,0,0,0,24,250,46,0,0,0,0,0,6,0,0,0,0,0,0,0,96,194,211,170,
++53,0,0,0,138,248,133,101,183,250,61,0,32,251,109,0,0,1,203,193,0,90,255,31,0,0,0,128,250,1,94,255,
++28,0,0,0,116,255,4,51,255,85,0,0,0,174,214,0,0,192,227,74,33,117,254,88,0,0,18,168,251,255,255,111,
++0,0,0,0,0,5,49,195,199,3,0,0,0,0,0,0,34,245,79,0,0,0,0,0,0,0,27,4,0,10,177,192,
++192,181,124,10,0,40,255,133,92,114,234,150,0,40,255,64,0,0,136,213,0,40,255,91,36,57,211,171,0,40,255,235,
++240,255,175,21,0,40,255,64,0,158,221,15,0,40,255,64,0,20,241,135,0,24,250,46,0,0,115,230,0,0,6,0,
++0,0,0,8,0,0,46,167,209,190,111,4,22,238,181,94,112,193,41,75,255,38,0,0,0,0,28,245,204,117,59,2,
++0,0,42,147,209,253,217,31,0,0,0,0,26,234,132,64,141,53,26,69,245,100,36,191,252,255,248,146,2,0,0,8,
++22,2,0,0,0,172,192,192,192,192,192,142,0,88,108,149,255,126,108,71,0,0,0,72,255,32,0,0,0,0,0,72,
++255,32,0,0,0,0,0,72,255,32,0,0,0,0,0,72,255,32,0,0,0,0,0,72,255,32,0,0,0,0,0,53,
++248,17,0,0,0,0,0,0,6,0,0,0,22,192,21,0,0,4,187,43,52,255,52,0,0,20,255,84,52,255,52,0,
++0,20,255,84,52,255,52,0,0,20,255,84,51,255,52,0,0,20,255,83,28,255,78,0,0,46,255,66,1,212,203,51,
++43,182,239,11,0,44,201,254,255,221,67,0,0,0,0,9,18,0,0,0,150,98,0,0,0,0,120,119,145,230,5,0,
++0,17,245,105,34,253,90,0,0,118,237,10,0,173,200,0,3,224,132,0,0,59,255,55,81,249,24,0,0,0,200,165,
++191,160,0,0,0,0,86,255,255,46,0,0,0,0,3,214,178,0,0,0,0,0,0,5,2,0,0,0,88,154,0,0,
++0,86,154,0,0,0,84,144,83,254,30,0,0,205,254,30,0,0,200,149,7,239,116,0,39,253,239,116,0,31,255,58,
++0,156,202,0,129,190,124,203,0,119,221,0,0,65,255,34,218,99,34,254,35,207,130,0,0,2,228,172,248,16,0,200,
++161,255,39,0,0,0,139,255,174,0,0,110,255,203,0,0,0,0,42,251,75,0,0,22,244,101,0,0,0,0,0,7,
++0,0,0,0,7,0,0,0,65,176,9,0,0,105,148,24,233,152,0,57,251,102,0,70,253,97,223,169,0,0,0,133,
++255,226,14,0,0,0,115,255,218,7,0,0,53,249,128,233,149,0,16,222,173,0,72,254,83,112,220,17,0,0,134,212,
++1,6,0,0,0,0,7,139,114,0,0,0,145,101,99,253,62,0,98,251,54,0,175,224,51,243,124,0,0,19,230,255,
++195,3,0,0,0,113,255,55,0,0,0,0,80,255,28,0,0,0,0,80,255,28,0,0,0,0,59,248,14,0,0,0,
++0,0,6,0,0,0,85,191,192,192,192,186,37,39,107,108,108,217,243,27,0,0,0,54,250,93,0,0,0,15,222,159,
++0,0,0,0,169,215,11,0,0,0,103,247,46,0,0,0,41,253,148,44,44,43,6,109,255,255,255,255,255,98,0,136,
++192,139,0,212,172,44,0,212,140,0,0,212,140,0,0,212,140,0,0,212,140,0,0,212,140,0,0,212,140,0,0,212,
++145,4,0,185,252,179,0,43,0,0,0,8,247,25,0,0,0,184,106,0,0,0,102,189,0,0,0,22,249,19,0,0,
++0,194,98,0,0,0,111,181,0,0,0,29,248,14,0,0,0,203,90,0,0,0,84,79,160,192,116,0,52,189,188,0,
++0,164,188,0,0,164,188,0,0,164,188,0,0,164,188,0,0,164,188,0,0,164,188,0,5,168,188,0,207,252,160,0,
++0,0,90,255,12,0,0,0,0,209,215,106,0,0,0,62,204,51,214,0,0,0,171,96,0,199,69,0,26,231,8,0,
++92,178,0,28,78,0,0,5,101,0,0,0,0,0,0,0,0,158,212,212,212,211,53,0,94,14,0,0,167,132,0,0,
++19,207,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,48,108,111,33,
++0,27,219,156,179,241,22,0,3,32,48,255,77,54,232,185,157,255,84,120,234,3,53,255,84,31,215,238,181,226,66,0,
++0,15,0,5,0,36,188,6,0,0,0,0,72,255,24,0,0,0,0,72,255,49,110,90,5,0,72,255,214,158,238,170,
++0,72,255,61,0,92,255,22,72,255,25,0,64,255,40,72,255,116,3,150,242,8,54,244,159,250,243,88,0,0,6,0,
++15,6,0,0,0,14,94,113,44,0,20,227,213,161,210,2,115,242,12,0,0,0,139,221,0,0,0,0,87,254,68,3,
++50,0,1,147,250,252,193,0,0,0,8,17,0,0,0,0,0,0,74,157,0,0,0,0,0,124,228,0,0,31,112,85,
++125,228,0,30,239,204,167,236,228,0,121,240,9,0,160,228,0,141,213,0,0,132,228,0,94,250,48,14,216,228,0,4,
++174,255,235,169,208,0,0,0,16,5,0,6,0,0,15,99,105,27,0,19,223,178,143,234,28,115,240,45,44,193,123,140,
++255,160,160,160,80,83,246,48,0,43,36,0,136,246,247,230,69,0,0,6,20,1,0,0,18,139,190,30,0,172,206,68,
++3,76,254,175,71,0,145,249,207,137,0,0,236,116,0,0,0,236,116,0,0,0,236,116,0,0,0,217,98,0,0,0,
++6,0,0,0,0,29,107,87,28,78,0,27,238,206,165,235,233,0,120,238,8,0,146,236,0,138,217,0,0,125,236,0,
++73,255,108,68,224,236,0,0,117,212,187,145,230,0,11,75,8,8,179,186,0,29,202,253,252,212,45,0,0,0,7,12,
++0,0,0,36,188,6,0,0,0,72,255,24,0,0,0,72,255,49,110,83,1,72,255,214,164,248,119,72,255,52,0,171,
++186,72,255,24,0,160,192,72,255,24,0,160,192,54,248,12,0,141,173,0,6,0,0,1,4,65,218,24,24,111,5,10,
++88,0,68,255,20,72,255,24,72,255,24,72,255,24,52,244,11,0,4,0,0,55,219,31,0,19,111,9,0,8,95,1,
++0,57,255,33,0,60,255,36,0,60,255,36,0,60,255,36,0,60,255,35,0,101,252,10,118,243,126,0,2,4,0,0,
++36,188,6,0,0,0,72,255,24,0,0,0,72,255,24,0,88,21,72,255,24,141,237,31,72,255,152,243,53,0,72,255,
++235,219,8,0,72,255,59,229,176,3,54,248,12,41,231,98,0,6,0,0,6,1,36,188,6,0,72,255,24,0,72,255,
++24,0,72,255,24,0,72,255,24,0,72,255,24,0,57,255,71,2,4,199,255,111,0,0,21,2,10,92,24,112,74,4,
++90,99,14,0,65,255,195,175,255,201,168,231,172,0,68,255,53,0,229,157,0,121,235,0,68,255,28,0,220,132,0,112,
++240,0,68,255,28,0,220,132,0,112,240,0,50,249,15,0,200,113,0,93,220,0,0,6,0,0,5,0,0,0,6,0,
++11,89,25,110,83,1,69,255,209,164,248,119,72,255,52,0,171,186,72,255,24,0,160,192,72,255,24,0,160,192,54,248,
++12,0,141,173,0,6,0,0,1,4,0,15,95,113,43,0,18,226,204,167,249,82,113,240,9,0,160,204,139,213,0,0,
++132,223,88,250,48,14,208,166,1,150,250,251,197,28,0,0,9,13,0,0,11,90,24,110,89,4,0,69,255,210,158,238,
++169,0,72,255,61,0,92,255,22,72,255,25,0,64,255,40,72,255,113,3,150,242,8,72,255,177,250,243,90,0,72,255,
++24,15,6,0,0,53,243,12,0,0,0,0,0,2,0,0,0,0,0,0,31,112,84,32,74,0,30,239,204,167,240,225,
++0,121,240,9,0,160,228,0,141,213,0,0,132,228,0,94,250,48,14,210,228,0,4,174,255,235,187,228,0,0,0,16,
++5,124,228,0,0,0,0,0,103,205,0,0,0,0,0,0,2,0,11,89,23,107,18,69,255,221,183,28,72,255,72,0,
++0,72,255,28,0,0,72,255,28,0,0,54,248,15,0,0,0,6,0,0,0,0,41,108,101,25,56,242,140,155,160,94,
++235,65,11,0,7,129,200,245,140,28,26,0,97,238,86,234,227,240,114,0,2,21,5,0,0,0,4,0,0,0,0,0,
++223,86,0,0,0,85,248,163,88,1,4,157,251,205,160,10,0,0,244,108,0,0,0,0,244,108,0,0,0,0,220,153,
++12,2,0,0,99,246,255,54,0,0,0,3,16,0,15,91,0,0,58,49,78,255,13,0,182,165,80,255,16,0,184,168,
++79,255,16,0,186,168,55,255,56,31,247,168,5,183,254,224,191,150,0,0,14,3,3,2,66,42,0,0,54,48,160,198,
++0,2,222,110,56,255,45,74,244,16,0,201,147,180,148,0,0,91,255,254,37,0,0,5,219,170,0,0,0,0,5,1,
++0,0,56,49,0,0,82,21,0,3,95,0,140,206,0,23,255,137,0,86,235,1,47,255,43,113,255,227,2,179,143,0,
++0,203,135,207,92,237,86,250,44,0,0,102,251,239,7,147,246,200,0,0,0,13,233,139,0,44,250,91,0,0,0,0,
++7,0,0,0,7,0,0,0,25,88,0,0,83,27,41,247,103,95,249,45,0,94,255,255,99,0,0,26,255,255,28,0,
++7,201,192,191,205,9,93,221,20,19,218,99,0,3,0,0,3,0,66,42,0,0,55,48,163,198,0,2,224,110,59,255,
++45,77,244,16,0,203,147,181,149,0,0,92,255,254,38,0,0,6,245,181,0,0,0,34,253,69,0,0,0,106,202,0,
++0,0,0,0,2,0,0,0,35,96,96,96,61,0,73,168,168,251,181,0,0,0,92,230,25,0,0,49,240,57,0,0,
++20,226,110,8,4,0,103,255,255,255,227,0,0,21,169,187,28,0,101,252,78,6,0,108,244,0,0,0,110,243,0,0,
++50,205,185,0,0,84,232,141,0,0,0,117,240,0,0,0,108,244,0,0,0,105,249,18,0,0,40,226,246,34,7,191,
++36,24,255,72,24,255,72,24,255,72,24,255,72,24,255,72,24,255,72,24,255,72,24,255,72,12,247,54,0,4,0,159,
++181,63,0,54,203,178,0,0,164,188,0,0,163,190,0,0,108,241,92,0,74,241,143,0,160,195,0,0,164,188,0,6,
++181,185,0,207,244,103,0,0,0,1,0,0,0,0,19,206,231,144,73,149,0,23,60,9,105,166,62,0,0,0,0,0,
++0,0,0,0,0,0,0,0,0,0,16,85,0,90,255,23,1,39,0,23,210,0,50,235,0,72,253,3,94,255,21,77,
++242,15,0,2,0,0,0,0,166,6,0,0,0,0,44,255,98,8,0,0,101,250,180,195,139,0,1,240,129,0,0,0,
++0,16,255,90,0,0,0,0,0,209,190,22,39,48,0,0,38,202,255,243,96,0,0,0,3,255,19,0,0,0,0,0,
++60,0,0,0,0,1,123,206,200,132,12,0,95,252,106,85,168,48,0,148,212,0,0,0,0,41,200,230,96,52,0,0,
++74,222,236,152,91,0,0,0,152,208,0,0,0,0,9,175,215,40,40,34,0,121,255,255,255,255,250,38,76,48,65,95,
++29,116,15,32,243,232,193,249,176,1,55,243,24,0,120,200,0,84,213,0,0,66,228,0,25,247,103,41,187,162,0,86,
++191,221,250,181,203,12,23,5,0,1,0,25,2,126,114,0,0,13,184,46,78,251,53,0,155,220,11,0,157,214,78,252,
++58,0,22,123,255,255,215,87,0,30,134,184,255,136,110,0,44,182,213,255,184,152,0,9,62,142,255,64,45,0,0,0,
++84,235,0,0,0,0,0,0,6,0,0,0,7,191,36,24,255,72,24,255,72,10,231,48,0,0,0,0,0,0,5,173,
++30,24,255,72,24,255,72,12,244,52,0,3,0,0,55,178,211,178,54,13,245,124,38,90,65,23,255,90,0,0,0,52,
++250,251,175,52,0,140,177,43,161,250,107,82,253,137,22,123,214,0,70,200,247,211,155,0,0,0,71,255,79,16,47,0,
++21,247,90,52,223,240,240,166,6,0,0,13,3,0,0,0,169,72,152,87,0,0,81,30,73,38,0,0,0,0,0,0,
++0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
++0,74,154,148,153,67,0,0,0,117,103,11,52,26,110,107,0,39,134,42,231,189,214,39,142,30,111,56,154,155,0,0,
++0,55,102,118,46,163,139,0,0,0,46,110,63,109,70,239,130,149,32,118,52,0,155,46,49,116,85,55,147,0,0,8,
++132,157,131,157,125,6,0,0,0,0,4,22,4,0,0,0,78,174,174,23,35,112,208,94,180,97,171,100,40,119,69,39,
++0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,137,108,70,175,42,251,45,220,113,57,
++250,35,234,95,0,162,116,90,188,0,5,7,0,12,71,191,192,192,192,170,0,14,55,56,56,62,252,0,0,0,0,0,
++8,252,0,0,0,0,0,0,107,0,0,0,0,0,0,0,0,0,0,74,154,148,153,67,0,0,0,117,104,49,55,24,
++110,107,0,39,134,48,237,152,228,49,142,30,111,56,56,218,39,194,81,55,102,118,46,56,245,193,208,1,46,110,63,109,
++55,215,2,231,36,118,52,0,155,60,85,0,75,78,147,0,0,8,132,157,131,157,125,6,0,0,0,0,4,22,4,0,
++0,0,0,124,152,152,89,0,0,41,56,56,27,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
++0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,25,176,187,47,141,92,52,182,112,154,124,153,1,95,
++109,10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,35,170,0,0,0,9,43,87,216,44,35,0,
++75,203,214,246,204,194,4,0,0,52,208,0,0,0,0,0,16,94,0,0,0,85,247,248,248,248,229,4,51,159,152,22,
++68,75,200,132,0,15,221,69,10,195,112,0,98,255,236,178,0,0,0,0,0,0,0,0,0,0,0,0,52,159,159,33,
++65,74,175,146,0,190,242,66,13,23,133,177,117,229,239,95,0,4,3,0,0,0,0,0,0,0,0,0,0,5,103,0,
++0,101,199,0,0,191,38,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
++3,98,5,0,41,65,0,42,255,49,0,146,201,0,44,255,52,0,148,204,0,44,255,52,0,150,204,0,44,255,95,20,
++216,204,0,44,255,234,245,178,186,0,44,255,38,11,1,5,0,27,246,27,0,0,0,0,0,2,0,0,0,0,0,0,
++94,183,192,192,166,1,84,255,255,202,56,249,8,148,255,255,188,0,248,8,103,255,255,188,0,248,8,1,132,227,188,0,
++248,8,0,0,68,188,0,248,8,0,0,68,188,0,248,8,0,0,68,188,0,248,8,0,0,68,188,0,248,8,0,0,
++58,178,0,231,4,0,0,0,3,0,3,0,47,165,9,60,194,14,0,0,0,0,0,0,0,12,28,0,0,0,70,188,
++40,0,0,121,179,99,0,0,15,17,0,0,0,77,146,0,55,218,241,0,0,44,236,0,0,44,236,0,51,237,254,170,
++0,0,0,0,0,0,0,0,0,0,0,0,51,180,171,32,182,58,87,148,152,127,149,116,8,101,93,2,0,0,0,0,
++0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,70,174,9,216,19,15,240,78,183,150,7,229,97,164,169,
++76,202,12,239,32,3,9,0,12,0,0,77,146,0,0,0,44,182,0,0,55,218,241,0,0,0,189,113,0,0,0,44,
++236,0,0,81,215,5,0,0,0,44,236,0,7,221,72,7,150,32,51,237,254,170,121,180,0,138,255,72,0,0,0,25,
++237,38,59,181,208,72,0,0,0,161,140,0,205,205,241,170,0,0,32,231,14,0,35,56,204,85,0,0,1,21,0,0,
++0,0,1,0,0,77,146,0,0,0,44,182,0,0,0,55,218,241,0,0,0,189,113,0,0,0,0,44,236,0,0,81,
++215,5,0,0,0,0,44,236,0,7,221,84,134,167,72,0,51,237,254,170,121,180,23,96,128,228,0,0,0,0,25,237,
++38,0,0,142,163,0,0,0,0,161,140,0,0,110,196,11,0,0,0,32,231,14,0,12,246,243,232,35,0,0,1,21,
++0,0,0,0,0,0,0,52,159,159,33,0,0,44,182,0,0,65,74,175,146,0,0,189,113,0,0,0,190,242,66,0,
++81,215,5,0,0,13,23,133,177,7,221,72,7,150,32,117,229,239,95,121,180,0,138,255,72,0,4,3,25,237,38,59,
++181,208,72,0,0,0,161,140,0,205,205,241,170,0,0,32,231,14,0,35,56,204,85,0,0,1,21,0,0,0,0,1,
++0,0,1,85,15,0,0,0,27,255,86,0,0,0,0,36,0,0,0,0,8,228,1,0,0,6,173,158,0,0,0,141,
++211,8,0,0,0,198,197,38,67,127,0,68,228,255,241,136,0,0,0,14,0,0,0,0,0,52,39,0,0,0,0,0,
++0,88,213,7,0,0,0,0,0,0,100,36,0,0,0,0,0,0,115,158,0,0,0,0,0,20,246,249,63,0,0,0,
++0,127,198,151,179,0,0,0,8,233,91,43,253,40,0,0,102,233,6,0,190,155,0,1,215,255,236,236,255,248,23,77,
++254,76,52,52,55,238,132,155,158,0,0,0,0,110,212,5,1,0,0,0,0,0,8,0,0,0,0,15,75,0,0,0,
++0,0,0,165,143,0,0,0,0,0,4,130,2,0,0,0,0,0,115,158,0,0,0,0,0,20,246,249,63,0,0,0,
++0,127,198,151,179,0,0,0,8,233,91,43,253,40,0,0,102,233,6,0,190,155,0,1,215,255,236,236,255,248,23,77,
++254,76,52,52,55,238,132,155,158,0,0,0,0,110,212,5,1,0,0,0,0,0,8,0,0,0,51,78,0,0,0,0,
++0,32,219,206,75,0,0,0,0,83,55,23,113,0,0,0,0,0,115,158,0,0,0,0,0,20,246,249,63,0,0,0,
++0,127,198,151,179,0,0,0,8,233,91,43,253,40,0,0,102,233,6,0,190,155,0,1,215,255,236,236,255,248,23,77,
++254,76,52,52,55,238,132,155,158,0,0,0,0,110,212,5,1,0,0,0,0,0,8,0,0,11,20,0,5,22,0,0,
++21,217,218,167,168,97,0,0,33,54,2,81,94,2,0,0,0,0,115,158,0,0,0,0,0,20,246,249,63,0,0,0,
++0,127,198,151,179,0,0,0,8,233,91,43,253,40,0,0,102,233,6,0,190,155,0,1,215,255,236,236,255,248,23,77,
++254,76,52,52,55,238,132,155,158,0,0,0,0,110,212,5,1,0,0,0,0,0,8,0,0,120,155,101,173,0,0,0,
++0,30,43,24,49,0,0,0,0,0,115,158,0,0,0,0,0,20,246,249,63,0,0,0,0,127,198,151,179,0,0,0,
++8,233,91,43,253,40,0,0,102,233,6,0,190,155,0,1,215,255,236,236,255,248,23,77,254,76,52,52,55,238,132,155,
++158,0,0,0,0,110,212,5,1,0,0,0,0,0,8,0,0,13,172,177,43,0,0,0,0,53,132,77,108,0,0,0,
++0,1,122,145,14,0,0,0,0,0,115,158,0,0,0,0,0,20,246,249,63,0,0,0,0,127,198,151,179,0,0,0,
++8,233,91,43,253,40,0,0,102,233,6,0,190,155,0,1,215,255,236,236,255,248,23,77,254,76,52,52,55,238,132,155,
++158,0,0,0,0,110,212,5,1,0,0,0,0,0,8,0,0,0,0,0,144,192,192,192,192,191,61,0,0,0,0,92,
++251,255,95,92,92,91,21,0,0,0,17,233,109,255,46,0,0,0,0,0,0,0,154,194,0,218,191,128,128,121,10,0,
++0,59,251,47,0,162,245,160,160,154,16,0,5,211,255,236,236,255,215,0,0,0,0,0,120,237,67,52,52,104,255,49,
++32,31,2,0,238,96,0,0,0,6,232,255,255,255,82,0,8,0,0,0,0,0,0,0,0,0,0,0,0,91,191,212,
++179,77,0,0,137,252,153,108,153,208,0,32,251,121,0,0,0,0,0,90,255,39,0,0,0,0,0,94,255,32,0,0,
++0,0,0,51,255,90,0,0,0,0,0,0,192,233,86,43,86,153,1,0,17,165,255,255,241,138,0,0,0,0,56,218,
++50,0,0,0,0,0,111,170,118,0,0,0,0,0,12,20,0,0,0,0,4,87,0,0,0,0,0,7,207,94,0,0,
++0,0,0,23,113,0,0,0,9,176,192,192,192,180,5,40,255,125,92,92,80,0,40,255,52,0,0,0,0,40,255,154,
++128,128,88,0,40,255,179,160,160,115,0,40,255,52,0,0,0,0,40,255,77,32,32,22,0,19,240,255,255,255,243,6,
++0,0,0,0,68,22,0,0,0,0,44,230,34,0,0,0,0,82,55,0,0,9,176,192,192,192,180,5,40,255,125,92,
++92,80,0,40,255,52,0,0,0,0,40,255,154,128,128,88,0,40,255,179,160,160,115,0,40,255,52,0,0,0,0,40,
++255,77,32,32,22,0,19,240,255,255,255,243,6,0,0,5,101,23,0,0,0,0,145,187,196,3,0,0,3,132,2,101,
++36,0,9,176,192,192,192,180,5,40,255,125,92,92,80,0,40,255,52,0,0,0,0,40,255,154,128,128,88,0,40,255,
++179,160,160,115,0,40,255,52,0,0,0,0,40,255,77,32,32,22,0,19,240,255,255,255,243,6,0,8,230,37,221,52,
++0,0,0,68,5,64,10,0,9,176,192,192,192,180,5,40,255,125,92,92,80,0,40,255,52,0,0,0,0,40,255,154,
++128,128,88,0,40,255,179,160,160,115,0,40,255,52,0,0,0,0,40,255,77,32,32,22,0,19,240,255,255,255,243,6,
++8,83,0,0,13,217,77,0,0,31,105,0,0,14,192,29,0,40,255,64,0,40,255,64,0,40,255,64,0,40,255,64,
++0,40,255,64,0,40,255,64,0,24,250,46,0,0,6,0,0,0,74,16,0,56,227,25,0,91,45,0,14,192,29,0,
++40,255,64,0,40,255,64,0,40,255,64,0,40,255,64,0,40,255,64,0,40,255,64,0,24,250,46,0,0,6,0,0,
++0,8,103,17,0,0,161,186,184,1,11,126,0,111,26,0,14,192,29,0,0,40,255,64,0,0,40,255,64,0,0,40,
++255,64,0,0,40,255,64,0,0,40,255,64,0,0,40,255,64,0,0,24,250,46,0,0,0,6,0,0,20,232,30,229,
++39,1,70,2,67,6,0,14,192,29,0,0,40,255,64,0,0,40,255,64,0,0,40,255,64,0,0,40,255,64,0,0,
++40,255,64,0,0,40,255,64,0,0,24,250,46,0,0,0,6,0,0,0,9,176,192,190,163,109,7,0,0,40,255,142,
++106,137,235,214,18,0,40,255,64,0,0,33,247,131,8,146,255,176,111,33,0,194,190,14,186,255,216,151,49,0,186,196,
++0,40,255,64,0,0,13,236,152,0,40,255,97,46,74,191,245,41,0,19,240,255,254,228,173,40,0,0,0,11,20,0,
++5,22,0,0,21,217,218,167,168,97,0,0,33,54,2,81,94,2,0,14,192,37,0,0,0,166,54,40,255,210,10,0,
++0,236,96,40,255,248,161,0,0,236,96,40,255,84,245,103,0,236,96,40,255,40,92,248,52,236,96,40,255,40,0,151,
++224,254,96,40,255,40,0,7,203,255,96,25,250,25,0,0,32,234,81,0,6,0,0,0,0,7,0,0,0,30,61,0,
++0,0,0,0,0,0,46,231,31,0,0,0,0,0,0,0,66,70,0,0,0,0,0,0,96,194,211,170,53,0,0,0,
++138,248,133,101,183,250,61,0,32,251,109,0,0,1,203,193,0,90,255,31,0,0,0,128,250,1,94,255,28,0,0,0,
++116,255,4,51,255,85,0,0,0,174,214,0,0,192,227,74,33,117,254,88,0,0,18,168,251,255,235,101,0,0,0,0,
++0,5,21,2,0,0,0,0,0,0,0,2,88,0,0,0,0,0,0,0,113,193,1,0,0,0,0,0,0,121,16,0,
++0,0,0,0,96,194,211,170,53,0,0,0,138,248,133,101,183,250,61,0,32,251,109,0,0,1,203,193,0,90,255,31,
++0,0,0,128,250,1,94,255,28,0,0,0,116,255,4,51,255,85,0,0,0,174,214,0,0,192,227,74,33,117,254,88,
++0,0,18,168,251,255,235,101,0,0,0,0,0,5,21,2,0,0,0,0,0,0,30,97,2,0,0,0,0,0,9,207,
++190,126,0,0,0,0,0,49,89,5,131,0,0,0,0,0,96,194,211,170,53,0,0,0,138,248,133,101,183,250,61,0,
++32,251,109,0,0,1,203,193,0,90,255,31,0,0,0,128,250,1,94,255,28,0,0,0,116,255,4,51,255,85,0,0,
++0,174,214,0,0,192,227,74,33,117,254,88,0,0,18,168,251,255,235,101,0,0,0,0,0,5,21,2,0,0,0,0,
++0,5,26,0,0,28,0,0,0,1,196,210,191,141,149,0,0,0,7,79,0,61,105,13,0,0,0,0,96,194,211,170,
++53,0,0,0,138,248,133,101,183,250,61,0,32,251,109,0,0,1,203,193,0,90,255,31,0,0,0,128,250,1,94,255,
++28,0,0,0,116,255,4,51,255,85,0,0,0,174,214,0,0,192,227,74,33,117,254,88,0,0,18,168,251,255,235,101,
++0,0,0,0,0,5,21,2,0,0,0,0,0,71,204,54,220,0,0,0,0,0,15,59,10,64,0,0,0,0,0,96,
++194,211,170,53,0,0,0,138,248,133,101,183,250,61,0,32,251,109,0,0,1,203,193,0,90,255,31,0,0,0,128,250,
++1,94,255,28,0,0,0,116,255,4,51,255,85,0,0,0,174,214,0,0,192,227,74,33,117,254,88,0,0,18,168,251,
++255,235,101,0,0,0,0,0,5,21,2,0,0,0,15,118,1,0,34,96,0,4,183,157,37,223,87,0,0,7,186,248,
++93,0,0,0,35,222,203,157,1,0,10,223,87,7,181,135,0,1,42,0,0,6,40,0,0,0,0,0,0,0,56,2,
++0,0,0,96,194,211,220,255,14,0,0,138,248,133,101,255,255,61,0,32,251,109,0,83,218,209,193,0,90,255,31,8,
++223,73,128,250,1,94,255,28,125,179,0,116,255,4,51,255,113,238,37,0,174,214,0,0,192,255,212,33,117,254,88,0,
++0,82,255,255,255,235,101,0,0,0,58,71,5,21,2,0,0,0,0,0,57,34,0,0,0,0,0,0,99,205,4,0,
++0,0,0,0,0,107,29,0,0,0,22,192,21,0,0,4,187,43,52,255,52,0,0,20,255,84,52,255,52,0,0,20,
++255,84,52,255,52,0,0,20,255,84,51,255,52,0,0,20,255,83,28,255,78,0,0,46,255,66,1,212,203,51,43,182,
++239,11,0,44,201,254,255,221,67,0,0,0,0,9,18,0,0,0,0,0,0,0,19,71,0,0,0,0,0,0,177,131,
++0,0,0,0,0,10,126,1,0,0,22,192,21,0,0,4,187,43,52,255,52,0,0,20,255,84,52,255,52,0,0,20,
++255,84,52,255,52,0,0,20,255,84,51,255,52,0,0,20,255,83,28,255,78,0,0,46,255,66,1,212,203,51,43,182,
++239,11,0,44,201,254,255,221,67,0,0,0,0,9,18,0,0,0,0,0,0,57,72,0,0,0,0,0,40,218,210,64,
++0,0,0,0,90,48,29,107,0,0,22,192,21,0,0,4,187,43,52,255,52,0,0,20,255,84,52,255,52,0,0,20,
++255,84,52,255,52,0,0,20,255,84,51,255,52,0,0,20,255,83,28,255,78,0,0,46,255,66,1,212,203,51,43,182,
++239,11,0,44,201,254,255,221,67,0,0,0,0,9,18,0,0,0,0,0,132,144,112,162,0,0,0,0,35,39,28,45,
++0,0,22,192,21,0,0,4,187,43,52,255,52,0,0,20,255,84,52,255,52,0,0,20,255,84,52,255,52,0,0,20,
++255,84,51,255,52,0,0,20,255,83,28,255,78,0,0,46,255,66,1,212,203,51,43,182,239,11,0,44,201,254,255,221,
++67,0,0,0,0,9,18,0,0,0,0,0,0,0,85,5,0,0,0,0,89,210,8,0,0,0,0,111,26,0,0,139,
++114,0,0,0,145,101,99,253,62,0,98,251,54,0,175,224,51,243,124,0,0,19,230,255,195,3,0,0,0,113,255,55,
++0,0,0,0,80,255,28,0,0,0,0,80,255,28,0,0,0,0,59,248,14,0,0,0,0,0,6,0,0,0,11,177,
++29,0,0,0,0,40,255,151,116,105,48,0,40,255,190,168,189,252,102,40,255,64,0,0,151,207,40,255,64,0,0,158,
++204,40,255,202,184,205,251,90,40,255,139,100,89,35,0,22,240,42,0,0,0,0,0,0,0,0,0,0,0,0,44,172,
++209,172,32,0,9,228,155,50,204,150,0,54,255,33,24,230,96,0,72,255,24,190,150,0,0,72,255,24,215,189,57,0,
++72,255,24,37,157,243,153,72,255,42,59,0,116,229,54,246,55,219,246,244,100,0,6,0,0,17,3,0,0,58,50,0,
++0,0,0,91,207,1,0,0,0,0,170,55,0,0,0,48,109,111,33,0,27,219,156,179,241,22,0,3,32,48,255,77,
++54,232,185,157,255,84,120,234,3,53,255,84,31,215,238,181,226,66,0,0,15,0,5,0,0,0,0,34,74,0,0,0,
++0,177,123,0,0,0,25,199,4,0,0,48,108,111,33,0,27,219,156,179,241,22,0,3,32,48,255,77,54,232,185,157,
++255,84,120,234,3,53,255,84,31,215,238,181,226,66,0,0,15,0,5,0,0,0,60,77,0,0,0,15,220,218,35,0,
++0,111,98,68,139,0,0,49,108,111,33,0,27,219,156,179,241,22,0,3,32,48,255,77,54,232,185,157,255,84,120,234,
++3,53,255,84,31,215,238,181,226,66,0,0,15,0,5,0,0,0,8,0,16,2,0,177,225,135,201,17,1,100,5,105,
++69,0,0,48,108,111,33,0,27,219,156,179,241,22,0,3,32,48,255,77,54,232,185,157,255,84,120,234,3,53,255,84,
++31,215,238,181,226,66,0,0,15,0,5,0,0,115,126,98,141,0,0,53,58,43,68,0,0,48,108,111,33,0,27,219,
++156,179,241,22,0,3,32,48,255,77,54,232,185,157,255,84,120,234,3,53,255,84,31,215,238,181,226,66,0,0,15,0,
++5,0,0,4,129,142,11,0,0,65,119,87,96,0,0,18,176,180,34,0,0,48,108,111,33,0,27,219,156,179,241,22,
++0,3,32,48,255,77,54,232,185,157,255,84,120,234,3,53,255,84,31,215,238,181,226,66,0,0,15,0,5,0,0,47,
++108,108,24,42,113,79,1,0,26,219,156,179,241,236,136,193,154,0,0,2,31,48,255,158,48,70,255,10,54,232,185,157,
++255,214,156,156,151,12,125,234,3,56,255,183,10,7,70,1,31,211,238,224,70,194,252,250,185,6,0,0,16,2,0,0,
++15,11,0,0,0,14,94,113,44,0,20,227,213,161,210,2,115,242,12,0,0,0,139,221,0,0,0,0,87,254,68,3,
++50,0,1,147,255,255,193,0,0,0,101,194,29,0,0,0,134,188,76,0,0,0,18,14,0,0,0,50,58,0,0,0,
++0,75,220,4,0,0,0,0,155,71,0,0,0,15,99,105,27,0,19,223,178,143,234,28,115,240,45,44,193,123,140,255,
++160,160,160,80,83,246,48,0,43,36,0,136,246,247,230,69,0,0,6,20,1,0,0,0,0,26,82,0,0,0,0,161,
++139,0,0,0,13,207,9,0,0,15,99,105,27,0,19,223,178,143,234,28,115,240,45,44,193,123,140,255,160,160,160,80,
++83,246,48,0,43,36,0,136,246,247,230,69,0,0,6,20,1,0,0,0,52,85,0,0,0,9,217,215,48,0,0,96,
++113,55,153,0,0,15,99,105,27,0,19,223,178,143,234,28,115,240,45,44,193,123,140,255,160,160,160,80,83,246,48,0,
++43,36,0,136,246,247,230,69,0,0,6,20,1,0,0,101,139,85,154,0,0,45,66,36,75,0,0,15,99,105,27,0,
++19,223,178,143,234,28,115,240,45,44,193,123,140,255,160,160,160,80,83,246,48,0,43,36,0,136,246,247,230,69,0,0,
++6,20,1,0,19,90,0,0,23,236,39,0,0,88,138,0,0,10,88,0,0,68,255,20,0,72,255,24,0,72,255,24,
++0,72,255,24,0,52,244,11,0,0,4,0,0,3,104,1,0,93,206,1,0,185,44,0,10,88,0,0,68,255,20,0,
++72,255,24,0,72,255,24,0,72,255,24,0,52,244,11,0,0,4,0,0,0,22,110,5,0,0,169,207,114,0,29,180,
++13,195,0,0,11,88,0,0,0,68,255,20,0,0,72,255,24,0,0,72,255,24,0,0,72,255,24,0,0,52,244,11,
++0,0,0,4,0,0,47,193,33,199,7,17,94,10,100,0,0,10,88,0,0,0,68,255,20,0,0,72,255,24,0,0,
++72,255,24,0,0,72,255,24,0,0,52,244,11,0,0,0,4,0,0,0,103,163,80,149,71,0,61,239,252,189,4,0,
++111,71,33,236,75,0,112,225,221,212,190,84,252,84,41,241,235,140,216,0,0,135,224,100,247,42,13,201,157,4,157,251,
++251,189,22,0,0,10,11,0,0,0,0,9,0,9,8,0,135,229,155,181,54,0,102,0,87,92,0,11,89,25,110,83,
++1,69,255,209,164,248,119,72,255,52,0,171,186,72,255,24,0,160,192,72,255,24,0,160,192,54,248,12,0,141,173,0,
++6,0,0,1,4,0,44,64,0,0,0,0,64,227,7,0,0,0,0,143,83,0,0,0,15,95,113,43,0,18,226,204,
++167,249,82,113,240,9,0,160,204,139,213,0,0,132,223,88,250,48,14,208,166,1,150,250,251,197,28,0,0,9,13,0,
++0,0,0,0,21,87,0,0,0,0,149,151,0,0,0,6,209,13,0,0,15,95,113,43,0,18,226,204,167,249,82,113,
++240,9,0,160,204,139,213,0,0,132,223,88,250,48,14,208,166,1,150,250,251,197,28,0,0,9,13,0,0,0,0,47,
++91,0,0,0,5,212,213,58,0,0,84,125,46,162,0,0,15,95,113,43,0,18,226,204,167,249,82,113,240,9,0,160,
++204,139,213,0,0,132,223,88,250,48,14,208,166,1,150,250,251,197,28,0,0,9,13,0,0,0,0,9,0,12,6,0,
++150,228,147,190,39,0,102,1,94,83,0,0,15,95,113,43,0,18,226,204,167,249,82,113,240,9,0,160,204,139,213,0,
++0,132,223,88,250,48,14,208,166,1,150,250,251,197,28,0,0,9,13,0,0,0,91,149,75,164,0,0,40,71,31,80,
++0,0,15,95,113,43,0,18,226,204,167,249,82,113,240,9,0,160,204,139,213,0,0,132,223,88,250,48,14,208,166,1,
++150,250,251,197,28,0,0,9,13,0,0,0,0,62,166,0,0,0,0,0,9,38,0,0,0,60,163,164,164,164,154,3,
++25,83,84,84,84,75,0,0,0,35,100,0,0,0,0,0,36,105,0,0,0,0,15,95,113,210,42,18,226,204,238,255,
++83,113,240,14,211,205,204,139,213,115,145,132,223,88,255,255,30,208,166,1,255,255,251,197,28,0,108,11,13,0,0,0,
++44,64,0,0,0,0,64,227,7,0,0,0,0,143,83,0,0,15,91,0,0,58,49,78,255,13,0,182,165,80,255,16,
++0,184,168,79,255,16,0,186,168,55,255,56,31,247,168,5,183,254,224,191,150,0,0,14,3,3,2,0,0,0,21,87,
++0,0,0,0,149,151,0,0,0,6,209,13,0,15,91,0,0,58,49,78,255,13,0,182,165,80,255,16,0,184,168,79,
++255,16,0,186,168,55,255,56,31,247,168,5,183,254,224,191,150,0,0,14,3,3,2,0,0,47,91,0,0,0,5,212,
++213,58,0,0,84,125,46,162,0,15,92,0,0,58,49,78,255,13,0,182,165,80,255,16,0,184,168,79,255,16,0,186,
++168,55,255,56,31,247,168,5,183,254,224,191,150,0,0,14,3,3,2,0,91,149,75,164,0,0,40,71,31,80,0,15,
++91,0,0,58,49,78,255,13,0,182,165,80,255,16,0,184,168,79,255,16,0,186,168,55,255,56,31,247,168,5,183,254,
++224,191,150,0,0,14,3,3,2,0,0,0,54,54,0,0,0,2,214,83,0,0,0,63,165,0,0,66,42,0,0,55,
++48,163,198,0,2,224,110,59,255,45,77,244,16,0,203,147,181,149,0,0,92,255,254,38,0,0,6,245,181,0,0,0,
++34,253,69,0,0,0,106,202,0,0,0,0,0,2,0,0,0,36,188,6,0,0,0,0,72,255,24,0,0,0,0,72,
++255,48,110,89,4,0,72,255,215,158,238,169,0,72,255,61,0,92,255,22,72,255,25,0,64,255,40,72,255,113,3,150,
++242,8,72,255,177,250,243,90,0,72,255,24,15,6,0,0,53,243,12,0,0,0,0,0,2,0,0,0,0,0,0,149,
++91,132,107,0,0,71,40,62,49,0,66,42,0,0,55,48,163,198,0,2,224,110,59,255,45,77,244,16,0,203,147,181,
++149,0,0,92,255,254,38,0,0,6,245,181,0,0,0,34,253,69,0,0,0,106,202,0,0,0,0,0,2,0,0,0,
++29,121,3,62,91,0,99,53,79,242,20,145,197,0,213,129,0,2,0,0,2,0,2,0,
++};
++static const mpgb_glyph mpgb_g_hint[192] = {
++{32,0,0,3,0,3,0},{33,0,-8,3,9,3,0},{34,0,-8,5,8,5,27},{35,0,-8,7,9,7,67},{36,0,-10,7,12,7,130},{37,0,-8,10,9,10,214},{38,0,-8,8,9,8,304},{39,0,-8,3,8,3,376},
++{40,0,-8,4,11,4,400},{41,0,-8,4,11,4,444},{42,0,-8,5,8,5,488},{43,0,-6,7,6,7,528},{44,0,-2,3,4,3,570},{45,0,-4,5,4,5,582},{46,0,-2,3,3,3,602},{47,-1,-9,5,10,3,611},
++{48,0,-8,7,9,7,661},{49,0,-8,7,8,7,724},{50,0,-8,7,8,7,780},{51,0,-8,7,9,7,836},{52,0,-8,7,9,7,899},{53,0,-8,7,9,7,962},{54,0,-8,7,9,7,1025},{55,0,-8,7,9,7,1088},
++{56,0,-8,7,9,7,1151},{57,0,-8,7,9,7,1214},{58,0,-6,3,7,3,1277},{59,0,-6,3,8,3,1298},{60,0,-6,7,6,7,1322},{61,0,-5,7,5,7,1364},{62,0,-6,7,6,7,1399},{63,0,-8,5,9,5,1441},
++{64,0,-8,10,10,10,1486},{65,0,-8,8,9,8,1586},{66,0,-8,8,8,8,1658},{67,0,-8,8,9,7,1722},{68,0,-8,8,8,8,1794},{69,0,-8,7,8,7,1858},{70,0,-8,6,9,6,1914},{71,0,-8,8,9,8,1968},
++{72,0,-8,9,9,8,2040},{73,0,-8,3,9,3,2121},{74,-1,-8,5,9,4,2148},{75,0,-8,7,9,7,2193},{76,0,-8,7,8,6,2256},{77,0,-8,10,9,10,2312},{78,0,-8,8,9,8,2402},{79,0,-8,9,9,9,2474},
++{80,0,-8,7,9,7,2555},{81,0,-8,9,11,9,2618},{82,0,-8,8,9,8,2717},{83,0,-8,7,9,7,2789},{84,-1,-8,8,9,7,2852},{85,0,-8,8,9,8,2924},{86,0,-8,8,9,8,2996},{87,0,-8,12,9,12,3068},
++{88,0,-8,7,9,7,3176},{89,0,-8,7,9,7,3239},{90,0,-8,7,8,7,3302},{91,0,-8,4,10,4,3358},{92,-1,-9,5,10,3,3398},{93,0,-8,4,10,4,3448},{94,0,-7,7,7,7,3488},{95,0,0,6,1,6,3537},
++{96,0,-9,4,9,4,3543},{97,0,-6,6,7,6,3579},{98,0,-8,7,9,7,3621},{99,0,-6,6,7,5,3684},{100,0,-8,7,9,7,3726},{101,0,-6,6,7,6,3789},{102,0,-8,5,9,4,3831},{103,0,-6,7,9,7,3876},
++{104,0,-8,6,9,6,3939},{105,0,-8,3,9,3,3993},{106,-1,-8,4,11,3,4020},{107,0,-8,6,9,6,4064},{108,0,-8,4,9,4,4118},{109,0,-6,10,7,10,4154},{110,0,-6,6,7,6,4224},{111,0,-6,6,7,6,4266},
++{112,0,-6,7,9,7,4308},{113,0,-6,7,9,7,4371},{114,0,-6,5,7,4,4434},{115,0,-6,5,7,5,4469},{116,-1,-8,6,9,4,4504},{117,0,-6,6,7,6,4558},{118,0,-6,6,7,6,4600},{119,0,-6,10,7,9,4642},
++{120,0,-6,6,7,6,4712},{121,0,-6,6,9,6,4754},{122,0,-6,6,6,5,4808},{123,0,-8,5,10,4,4844},{124,0,-8,3,11,3,4894},{125,0,-8,4,10,4,4927},{126,0,-5,7,5,7,4967},{160,0,0,3,0,3,5002},
++{161,0,-6,3,9,3,5002},{162,0,-7,7,9,7,5029},{163,0,-8,7,8,7,5092},{164,0,-6,7,7,7,5148},{165,0,-8,7,9,7,5197},{166,0,-8,3,11,3,5260},{167,0,-8,6,11,6,5293},{168,0,-8,6,8,6,5359},
++{169,0,-8,9,9,9,5407},{170,0,-8,4,8,4,5488},{171,0,-6,5,6,5,5520},{172,0,-5,7,5,7,5550},{173,0,0,0,0,0,5585},{174,0,-8,9,9,9,5585},{175,0,-8,6,8,6,5666},{176,0,-8,4,8,4,5714},
++{177,0,-6,7,6,7,5746},{178,0,-8,4,8,4,5788},{179,0,-8,4,8,4,5820},{180,0,-9,4,9,4,5852},{181,0,-6,7,9,7,5888},{182,0,-8,7,11,7,5951},{183,0,-4,3,4,3,6028},{184,0,-1,5,4,5,6040},
++{185,0,-8,4,8,4,6060},{186,0,-8,4,8,4,6092},{187,0,-6,5,6,5,6124},{188,0,-8,10,9,10,6154},{189,0,-8,11,9,11,6244},{190,0,-8,10,9,10,6343},{191,0,-6,6,9,5,6433},{192,0,-11,8,12,8,6487},
++{193,0,-11,8,12,8,6583},{194,0,-11,8,12,8,6679},{195,0,-11,8,12,8,6775},{196,0,-10,8,11,8,6871},{197,0,-11,8,12,8,6959},{198,-1,-8,12,9,11,7055},{199,0,-8,8,11,7,7163},{200,0,-11,7,11,7,7251},
++{201,0,-11,7,11,7,7328},{202,0,-11,7,11,7,7405},{203,0,-10,7,10,7,7482},{204,-1,-11,4,12,3,7552},{205,0,-11,4,12,3,7600},{206,-1,-11,5,12,3,7648},{207,-1,-10,5,11,3,7708},{208,-1,-8,9,8,8,7763},
++{209,0,-11,8,12,8,7835},{210,0,-11,9,12,9,7931},{211,0,-11,9,12,9,8039},{212,0,-11,9,12,9,8147},{213,0,-11,9,12,9,8255},{214,0,-10,9,11,9,8363},{215,0,-6,7,6,7,8462},{216,0,-9,9,10,9,8504},
++{217,0,-11,8,12,8,8594},{218,0,-11,8,12,8,8690},{219,0,-11,8,12,8,8786},{220,0,-10,8,11,8,8882},{221,0,-11,7,12,7,8970},{222,0,-8,7,9,7,9054},{223,0,-8,7,9,7,9117},{224,0,-9,6,10,6,9180},
++{225,0,-9,6,10,6,9240},{226,0,-9,6,10,6,9300},{227,0,-9,6,10,6,9360},{228,0,-8,6,9,6,9420},{229,0,-9,6,10,6,9474},{230,0,-6,10,7,10,9534},{231,0,-6,6,9,5,9604},{232,0,-9,6,10,6,9658},
++{233,0,-9,6,10,6,9718},{234,0,-9,6,10,6,9778},{235,0,-8,6,9,6,9838},{236,-1,-9,4,10,3,9892},{237,0,-9,4,10,3,9932},{238,-1,-9,5,10,3,9972},{239,-1,-8,5,9,3,10022},{240,0,-8,6,9,6,10067},
++{241,0,-9,6,10,6,10121},{242,0,-9,6,10,6,10181},{243,0,-9,6,10,6,10241},{244,0,-9,6,10,6,10301},{245,0,-9,6,10,6,10361},{246,0,-8,6,9,6,10421},{247,0,-6,7,6,7,10475},{248,0,-6,6,7,6,10517},
++{249,0,-9,6,10,6,10559},{250,0,-9,6,10,6,10619},{251,0,-9,6,10,6,10679},{252,0,-8,6,9,6,10739},{253,0,-9,6,12,6,10793},{254,0,-8,7,11,7,10865},{255,0,-8,6,11,6,10942},{8230,0,-2,8,3,8,11008},
++};
++static const mpgb_font mpgb_font_hint = { mpgb_g_hint, 192, mpgb_px_hint, 12, 4 };
++
++static const uint8_t mpgb_px_key[9307] = {
++0,8,87,182,85,180,70,165,55,150,36,132,7,31,87,182,0,1,1,10,4,7,84,165,120,129,76,155,112,119,40,106,
++70,76,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,9,0,9,0,0,0,181,0,178,6,30,103,
++205,92,215,50,29,139,158,106,190,44,0,120,68,75,112,0,64,206,132,178,158,42,29,208,56,197,68,16,9,173,0,182,
++0,0,0,4,0,4,0,0,0,0,11,24,0,0,0,0,81,135,0,0,5,153,219,214,198,35,92,190,2,0,41,24,
++90,207,20,0,0,0,4,138,228,210,127,7,0,0,0,36,190,118,47,40,0,0,159,127,58,202,226,227,169,13,0,0,
++80,130,0,0,0,0,8,17,0,0,0,7,20,0,0,0,27,0,0,24,200,178,121,0,25,195,0,0,105,108,2,217,
++0,161,69,0,0,111,103,1,213,54,177,22,35,0,29,201,172,126,193,87,201,172,110,0,9,23,92,141,136,78,10,208,
++0,0,11,207,15,137,83,19,195,0,0,121,104,0,41,202,191,85,0,0,21,1,0,0,3,7,0,0,0,5,22,0,
++0,0,0,59,214,189,139,0,0,0,140,102,16,211,0,0,0,62,209,187,94,20,11,0,110,229,210,7,143,70,55,209,
++7,129,174,209,20,91,179,0,0,200,211,1,11,176,202,209,147,157,120,0,0,7,8,0,0,5,1,10,84,165,76,155,
++40,106,0,0,0,0,0,0,0,0,0,0,10,0,24,196,0,125,133,0,196,72,0,235,37,0,247,27,0,230,43,0,
++184,87,0,104,155,0,10,160,8,1,0,114,111,0,44,220,0,0,239,34,0,204,73,0,192,82,0,207,62,3,243,16,
++62,193,0,99,70,0,0,0,0,0,0,0,166,113,71,0,99,213,255,162,19,2,151,175,41,0,0,56,21,33,0,0,
++0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,25,24,0,0,0,0,99,99,0,0,22,60,136,136,60,22,
++56,128,178,178,128,55,0,0,100,100,0,0,0,0,57,57,0,0,7,25,85,199,21,141,6,8,0,19,20,6,51,187,
++188,104,0,0,0,0,0,0,0,0,7,26,87,182,0,1,0,0,0,81,3,0,0,6,212,1,0,0,73,146,0,0,
++0,155,64,0,0,3,212,3,0,0,64,155,0,0,0,146,73,0,0,1,212,6,0,0,8,102,0,0,0,0,0,17,
++11,0,0,0,143,218,217,136,0,52,214,6,7,216,46,113,147,0,0,148,106,126,132,0,0,133,126,105,150,0,0,151,
++108,39,219,9,10,221,42,0,123,220,225,127,0,0,0,5,8,0,0,0,0,0,13,0,0,0,30,192,206,0,0,0,
++146,140,204,0,0,0,0,60,204,0,0,0,0,60,204,0,0,0,0,60,204,0,0,0,0,60,204,0,0,0,172,228,
++248,219,56,0,0,19,9,0,0,40,203,201,224,146,0,22,35,0,10,242,27,0,0,0,14,242,10,0,0,0,161,131,
++0,0,0,139,174,2,0,0,123,185,6,0,0,27,255,230,220,220,85,0,0,19,10,0,0,39,202,202,223,150,0,20,
++35,0,8,241,24,0,0,1,61,222,3,0,38,217,244,129,0,0,0,0,8,211,54,35,35,0,5,212,69,55,205,215,
++224,153,3,0,0,10,4,0,0,0,0,0,1,10,0,0,0,0,143,164,0,0,0,66,250,172,0,0,14,203,113,172,
++0,0,160,80,92,172,0,77,213,76,140,196,46,69,144,144,184,219,97,0,0,0,82,162,0,0,0,0,0,4,0,0,
++7,12,12,10,0,7,248,208,208,205,26,12,244,0,0,0,0,12,244,52,102,38,0,10,255,153,128,229,46,0,29,0,
++0,132,137,13,61,0,0,173,114,19,179,223,225,174,8,0,0,5,13,0,0,0,0,0,23,2,0,0,68,219,198,218,
++62,11,221,30,0,19,24,71,172,49,109,41,0,100,205,159,120,226,39,87,236,0,0,132,125,25,239,22,0,169,101,0,
++98,222,213,171,5,0,0,3,14,0,0,0,12,12,12,11,0,75,212,212,212,255,87,0,0,0,36,232,14,0,0,0,
++166,119,0,0,0,45,230,10,0,0,0,178,111,0,0,0,55,226,7,0,0,0,168,99,0,0,0,0,6,0,0,0,
++0,0,0,14,14,0,0,12,183,200,200,194,12,87,175,0,0,176,87,50,205,20,24,208,46,2,183,234,233,188,5,101,
++154,0,0,154,107,127,139,0,0,139,126,24,193,201,201,193,22,0,0,6,6,0,0,0,0,25,10,0,0,9,184,200,
++219,109,0,107,165,0,16,237,28,124,140,0,1,235,89,38,229,132,167,200,99,0,35,97,42,175,69,31,25,0,39,220,
++9,57,213,212,214,60,0,0,0,12,0,0,0,75,160,17,48,0,0,7,26,87,182,0,1,75,160,17,48,0,0,7,
++25,85,199,21,141,6,8,0,0,0,0,12,29,0,0,30,138,191,64,34,167,171,64,0,0,70,227,110,13,0,0,0,
++6,93,190,143,29,0,0,0,0,61,65,22,60,60,60,60,22,56,128,128,128,128,55,22,60,60,60,60,22,54,124,124,
++124,124,54,0,0,0,0,0,0,30,12,0,0,0,0,65,192,140,31,0,0,0,0,64,171,169,35,0,0,13,110,228,
++71,29,143,192,95,6,0,66,63,0,0,0,0,0,6,21,0,0,143,218,212,198,9,54,2,0,200,61,0,0,37,220,
++13,0,0,194,51,0,0,32,143,0,0,0,9,29,0,0,0,98,166,0,0,0,0,1,0,0,0,0,0,0,24,22,
++0,0,0,0,0,108,180,147,145,178,88,0,0,119,114,0,0,0,1,141,73,26,174,0,101,196,156,167,7,171,88,103,
++37,195,2,51,184,0,170,102,87,81,134,0,73,137,0,166,70,125,35,205,86,188,172,121,106,6,183,13,47,90,11,73,
++71,0,0,53,177,66,14,28,102,104,0,0,0,14,114,156,140,83,1,0,0,0,0,12,0,0,0,0,0,0,14,237,
++88,0,0,0,0,0,115,167,205,0,0,0,0,3,219,26,185,64,0,0,0,86,168,0,77,177,0,0,0,200,193,144,
++146,255,37,0,57,221,72,72,72,154,148,0,152,92,0,0,0,15,226,2,5,0,0,0,0,0,5,0,0,8,12,10,
++0,0,0,32,242,192,194,214,105,0,44,212,0,0,20,247,6,44,212,0,0,54,219,0,44,247,204,206,244,113,0,44,
++212,0,0,10,225,31,44,212,0,0,8,226,37,30,240,204,204,214,126,0,0,0,0,15,17,0,0,0,45,205,217,220,
++201,30,8,222,83,0,0,54,18,69,205,0,0,0,0,0,100,177,0,0,0,0,0,74,208,0,0,0,0,0,8,225,
++96,0,0,64,24,0,45,202,228,228,188,28,0,0,0,10,7,0,0,0,8,12,5,0,0,0,0,32,246,208,216,217,
++109,1,0,44,220,0,0,26,205,101,0,44,220,0,0,0,76,200,0,44,220,0,0,0,45,229,0,44,220,0,0,0,
++82,198,0,44,220,0,0,34,211,96,0,30,244,220,221,208,100,0,0,0,8,12,12,12,1,32,243,200,200,200,71,44,
++212,0,0,0,0,44,212,0,0,0,0,44,249,216,216,212,32,44,212,0,0,0,0,44,212,0,0,0,0,30,242,216,
++216,216,74,0,8,12,12,11,0,32,245,200,200,199,55,44,220,0,0,0,0,44,220,0,0,0,0,44,250,216,216,209,
++17,44,220,0,0,0,0,44,220,0,0,0,0,33,208,0,0,0,0,0,4,0,0,0,0,0,0,0,12,20,0,0,
++0,45,202,215,211,212,55,8,221,83,0,0,37,33,69,201,0,0,0,0,0,100,174,0,1,177,188,89,76,209,0,0,
++8,92,140,9,228,102,0,0,91,140,0,44,197,233,216,233,89,0,0,0,8,14,0,0,0,10,0,0,0,0,10,0,
++37,212,0,0,0,41,208,0,44,220,0,0,0,48,216,0,44,220,4,4,4,51,216,0,44,250,220,220,220,226,216,0,
++44,220,0,0,0,48,216,0,44,220,0,0,0,48,216,0,35,208,0,0,0,38,204,0,0,4,0,0,0,0,4,0,
++0,10,0,37,212,0,44,220,0,44,220,0,44,220,0,44,220,0,44,220,0,35,208,0,0,4,0,0,0,4,6,0,
++0,113,136,0,0,120,144,0,0,120,144,0,0,120,144,0,0,120,144,0,0,158,120,10,212,203,24,0,7,0,0,0,
++10,0,0,0,12,0,37,212,0,0,108,191,0,44,220,0,117,196,15,0,44,220,125,187,11,0,0,44,245,255,42,0,
++0,0,44,220,80,222,40,0,0,44,220,0,70,223,45,0,35,208,0,0,61,221,9,0,4,0,0,0,5,0,0,6,
++0,0,0,0,35,210,0,0,0,0,44,220,0,0,0,0,44,220,0,0,0,0,44,220,0,0,0,0,44,220,0,0,
++0,0,44,220,0,0,0,0,31,246,228,228,227,68,0,12,0,0,0,0,0,12,0,34,238,18,0,0,0,93,190,0,
++40,255,139,0,0,6,234,196,0,40,204,208,29,0,112,167,196,0,40,200,83,158,13,209,54,196,0,40,200,0,197,172,
++103,44,196,0,40,200,0,61,216,4,44,196,0,32,191,0,0,0,0,36,187,0,0,4,0,0,0,0,0,4,0,0,
++11,0,0,0,1,8,37,234,28,0,0,81,149,44,254,196,4,0,88,156,44,200,148,140,0,88,156,44,200,6,202,78,
++88,156,44,200,0,32,222,120,156,44,200,0,0,78,255,156,35,191,0,0,0,138,148,0,4,0,0,0,0,4,0,0,
++0,18,16,0,0,0,0,48,208,207,223,185,23,0,8,223,74,0,0,141,182,0,69,200,0,0,0,13,253,19,100,174,
++0,0,0,0,238,39,74,208,0,0,0,15,250,8,8,226,92,0,2,145,164,0,0,46,205,226,224,167,17,0,0,0,
++0,12,3,0,0,0,0,8,12,10,0,0,0,33,246,200,202,223,100,0,44,220,0,0,26,244,8,44,220,0,0,8,
++243,14,44,240,144,146,204,151,0,44,229,68,66,37,0,0,44,220,0,0,0,0,0,35,208,0,0,0,0,0,0,4,
++0,0,0,0,0,0,0,0,18,16,0,0,0,0,48,208,207,223,185,23,0,8,223,74,0,0,141,182,0,69,200,0,
++0,0,13,253,19,100,174,0,0,0,0,238,39,74,208,0,0,0,15,250,8,8,226,92,0,2,145,164,0,0,46,205,
++226,255,180,17,0,0,0,0,13,87,221,16,0,0,0,0,0,0,130,101,0,0,8,12,10,0,0,0,33,246,200,203,
++224,104,0,44,220,0,0,24,244,10,44,220,0,0,13,242,15,44,244,176,182,211,106,0,44,223,24,59,212,38,0,44,
++220,0,0,105,183,0,35,208,0,0,4,214,43,0,4,0,0,0,5,0,0,0,8,24,0,0,1,149,225,199,218,80,
++68,208,6,0,17,38,68,216,28,0,0,0,0,123,220,219,148,24,0,0,0,26,143,183,43,47,0,0,85,193,51,205,
++223,213,210,48,0,0,11,12,0,0,0,7,12,12,12,12,9,0,0,196,212,231,237,212,206,13,0,0,0,116,148,0,
++0,0,0,0,0,116,148,0,0,0,0,0,0,116,148,0,0,0,0,0,0,116,148,0,0,0,0,0,0,116,148,0,
++0,0,0,0,0,106,137,0,0,0,0,0,0,1,3,0,0,0,0,10,0,0,0,4,6,49,200,0,0,0,113,132,
++56,208,0,0,0,120,140,56,208,0,0,0,120,140,56,208,0,0,0,120,140,44,220,0,0,0,132,131,9,236,60,0,
++14,211,77,0,74,221,218,234,144,0,0,0,0,14,5,0,0,12,0,0,0,0,0,12,191,69,0,0,0,63,191,95,
++182,0,0,0,175,93,6,230,37,0,31,227,6,0,127,146,0,137,123,0,0,22,234,23,227,20,0,0,0,158,211,154,
++0,0,0,0,44,255,41,0,0,0,0,0,5,0,0,0,6,3,0,0,0,11,0,0,0,1,8,123,130,0,0,15,
++241,34,0,0,95,144,49,220,0,0,97,246,122,0,0,187,67,0,214,51,0,187,84,208,0,22,227,2,0,125,138,23,
++213,0,199,41,107,142,0,0,35,224,110,127,0,110,128,196,52,0,0,0,202,254,37,0,24,241,216,0,0,0,0,106,
++202,0,0,0,185,121,0,0,0,0,0,4,0,0,0,4,0,0,0,6,6,0,0,0,12,0,87,187,2,0,46,227,
++5,0,177,121,10,213,78,0,0,18,221,195,143,0,0,0,0,130,255,25,0,0,0,38,227,152,180,1,0,8,208,86,
++1,186,116,0,119,152,0,0,23,224,23,4,1,0,0,0,5,0,12,0,0,0,0,12,178,100,0,0,78,192,34,231,
++40,26,226,42,0,92,208,193,105,0,0,0,180,195,0,0,0,0,124,140,0,0,0,0,124,140,0,0,0,0,114,130,
++0,0,0,0,1,2,0,0,2,12,12,12,12,2,105,212,212,212,254,141,0,0,0,38,225,27,0,0,6,204,79,0,
++0,0,140,150,0,0,0,69,211,9,0,0,21,223,45,0,0,0,119,255,224,224,224,157,0,6,11,0,0,226,190,40,
++0,236,24,0,0,236,24,0,0,236,24,0,0,236,24,0,0,236,24,0,0,236,24,0,0,236,24,0,0,174,195,40,
++6,78,0,0,0,3,213,3,0,0,0,155,64,0,0,0,73,146,0,0,0,6,211,1,0,0,0,164,55,0,0,0,
++82,137,0,0,0,10,209,0,0,0,0,106,4,7,10,0,163,238,55,0,196,64,0,196,64,0,196,64,0,196,64,0,
++196,64,0,196,64,0,196,64,170,200,39,0,0,31,31,0,0,0,0,197,197,0,0,0,44,159,160,44,0,0,157,48,
++49,156,0,22,184,0,0,184,21,51,61,0,0,61,52,0,0,0,0,0,0,124,160,160,160,125,0,135,0,0,0,141,
++80,0,0,9,78,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,23,183,199,195,41,5,
++22,0,89,150,26,163,162,205,176,118,145,0,106,176,38,211,177,164,167,0,0,10,0,4,0,9,0,0,0,0,69,176,
++0,0,0,0,76,184,0,0,0,0,76,203,178,214,148,1,76,241,21,6,203,76,76,190,0,0,145,117,76,232,7,1,
++196,86,67,200,185,209,183,5,0,4,2,15,0,0,2,144,210,200,65,90,189,5,9,18,139,124,0,0,0,104,177,0,
++0,3,7,177,206,203,72,0,0,12,5,0,0,0,0,0,10,0,0,0,0,0,201,44,0,0,0,0,208,52,6,165,
++215,165,217,52,100,189,1,30,250,52,142,122,0,0,213,52,110,167,0,20,250,52,13,199,199,182,212,42,0,0,15,1,
++4,0,1,141,197,189,54,91,171,0,25,199,141,230,156,156,183,105,158,0,0,10,7,172,200,194,157,0,0,11,8,0,
++0,0,3,7,0,97,211,100,0,235,25,0,168,255,197,57,0,255,4,0,0,255,4,0,0,255,4,0,0,240,2,0,
++0,4,0,0,5,160,212,170,178,42,97,186,1,24,246,60,140,122,0,0,207,60,93,192,7,42,248,60,0,137,210,161,
++201,56,13,51,0,22,230,21,21,161,199,200,90,0,0,9,0,0,0,0,69,176,0,0,0,0,76,184,0,0,0,0,
++76,205,178,216,125,0,76,233,16,19,246,4,76,185,0,0,240,20,76,184,0,0,240,20,67,174,0,0,228,13,0,4,
++0,0,4,0,0,8,77,184,0,0,55,151,76,184,76,184,76,184,65,172,0,2,0,0,8,0,67,191,0,0,0,0,
++46,162,0,64,192,0,64,192,0,64,192,0,64,192,0,91,168,91,191,46,0,9,0,0,0,69,176,0,0,0,76,184,
++0,0,0,76,184,0,125,124,76,184,130,182,7,76,238,255,18,0,76,184,130,193,12,67,174,0,121,170,0,4,0,0,
++5,0,9,0,0,69,176,0,0,76,184,0,0,76,184,0,0,76,184,0,0,76,184,0,0,68,196,0,0,14,220,200,
++1,0,1,14,0,50,167,179,223,105,180,216,104,0,68,235,12,71,248,24,39,222,0,68,189,0,44,217,0,12,244,0,
++68,188,0,44,216,0,12,244,0,59,179,0,35,206,0,7,230,0,0,4,0,0,4,0,0,4,0,57,170,178,216,126,
++0,76,235,16,19,246,4,76,185,0,0,240,20,76,184,0,0,240,20,67,174,0,0,228,13,0,4,0,0,4,0,1,
++143,208,206,69,0,88,189,1,30,236,16,139,122,0,0,213,51,105,167,0,20,239,18,5,170,198,217,101,0,0,0,13,
++3,0,0,57,171,180,214,148,1,76,243,21,6,203,76,76,190,0,0,145,117,76,230,7,1,196,86,76,214,185,209,183,
++5,76,184,2,15,0,0,52,141,0,0,0,0,6,164,215,167,183,35,100,189,1,30,253,52,142,122,0,0,213,52,110,
++167,0,20,247,52,13,199,199,183,224,52,0,0,16,1,208,52,0,0,0,0,161,32,57,167,192,128,76,238,29,0,76,
++189,0,0,76,188,0,0,67,178,0,0,0,4,0,0,16,173,186,189,34,91,152,0,14,6,23,181,197,139,11,5,0,
++5,169,94,88,196,171,202,29,0,3,16,0,0,0,0,76,0,0,0,7,251,0,0,1,183,255,196,88,0,8,252,0,
++0,0,8,252,0,0,0,2,246,20,0,0,0,143,218,134,0,0,0,10,4,61,148,0,3,210,0,80,176,0,8,252,
++0,80,176,0,8,252,0,63,193,0,50,255,0,10,202,199,154,235,0,0,0,13,0,4,0,155,62,0,13,193,92,173,
++0,107,146,6,227,26,209,37,0,128,187,180,0,0,24,252,65,0,0,0,5,0,0,133,78,0,60,201,0,0,187,11,
++78,178,0,161,255,38,47,197,0,4,227,29,208,105,128,139,101,0,0,141,195,128,17,214,219,14,0,0,41,253,34,0,
++169,159,0,0,0,0,5,0,0,2,2,0,0,74,160,0,75,156,1,178,153,222,34,0,30,255,129,0,2,183,149,223,
++37,103,163,0,75,189,3,0,0,0,3,157,62,0,13,193,96,173,0,107,146,7,229,26,209,37,0,132,187,179,0,0,
++26,255,68,0,0,53,212,0,0,0,108,88,0,0,87,196,196,225,52,0,0,74,181,2,0,32,206,18,0,7,197,52,
++0,0,104,244,196,196,72,0,0,7,3,0,92,226,105,0,139,117,0,0,140,116,0,5,174,99,0,105,235,30,0,0,
++150,109,0,0,140,116,0,0,137,125,0,0,57,194,109,0,12,0,25,220,0,32,228,0,32,228,0,32,228,0,32,228,
++0,32,228,0,32,228,0,32,228,0,18,177,0,7,3,0,0,164,232,27,0,0,197,63,0,0,196,64,0,0,179,104,
++0,0,97,234,43,0,190,74,0,0,196,64,0,0,204,62,0,171,181,15,0,4,123,115,17,28,30,49,78,72,171,174,
++24,0,0,0,0,0,0,0,0,0,0,0,0,75,160,17,48,32,125,55,153,71,168,88,184,65,144,0,0,1,12,0,
++0,0,0,52,152,0,0,0,48,203,226,168,2,1,224,64,0,35,0,21,240,0,0,0,0,0,233,45,0,12,0,0,
++69,215,205,191,2,0,0,54,157,0,0,0,0,4,21,0,0,0,0,0,22,5,0,0,33,215,190,217,106,0,134,129,
++0,4,28,0,160,104,0,0,0,94,240,218,185,23,0,0,160,104,0,0,0,0,160,104,0,0,0,106,246,234,220,220,
++113,7,0,0,0,0,7,98,160,210,210,166,95,42,210,19,22,213,38,98,131,0,0,136,93,51,201,7,9,204,47,85,
++186,224,224,183,79,21,0,0,0,0,19,12,0,0,0,0,12,160,105,0,0,104,161,23,224,39,38,225,25,0,77,204,
++204,81,0,49,187,231,231,187,49,28,103,182,182,103,28,21,83,172,172,83,21,0,0,122,122,0,0,0,0,2,2,0,
++0,0,12,0,25,220,0,32,228,0,31,226,0,2,59,0,0,0,0,8,113,0,32,228,0,32,228,0,17,176,0,0,
++0,13,18,0,0,1,161,185,176,173,0,41,218,0,0,1,0,33,255,106,7,0,0,133,116,150,221,83,0,105,194,31,
++31,232,20,1,97,217,154,212,11,0,0,3,140,172,0,22,21,0,90,174,0,49,181,188,171,30,0,0,2,0,2,0,
++0,209,27,186,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
++0,0,0,0,0,0,19,24,0,0,0,0,33,135,116,108,138,52,0,11,138,22,137,163,60,125,27,103,38,170,94,22,
++47,9,131,131,2,217,5,0,0,0,134,100,42,160,108,34,52,11,128,9,142,17,120,147,52,132,23,0,29,136,125,120,
++141,47,0,0,0,0,10,13,0,0,0,1,27,4,66,108,175,109,110,216,116,125,168,0,0,0,0,0,0,0,0,0,
++0,0,0,0,66,11,72,5,23,216,41,211,3,87,169,103,153,0,4,202,27,207,9,0,15,0,16,0,24,64,64,64,
++64,17,54,124,124,124,167,110,0,0,0,0,84,112,0,0,0,0,43,60,0,0,0,0,0,0,0,0,0,19,24,0,
++0,0,0,33,135,116,108,138,52,0,11,138,56,158,154,51,125,27,103,38,104,96,30,186,9,131,131,2,104,198,205,90,
++0,134,100,42,104,100,95,114,11,128,9,142,62,53,11,98,132,23,0,29,136,125,120,141,47,0,0,0,0,10,13,0,
++0,0,0,149,164,160,10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
++0,0,0,0,0,0,13,5,0,77,162,178,29,147,33,97,81,42,170,161,12,0,0,0,0,0,0,0,0,0,0,0,
++0,0,0,0,0,0,0,27,26,0,0,0,0,99,99,0,0,76,176,207,207,176,75,3,16,109,109,16,3,0,0,64,
++64,0,0,79,188,188,188,188,77,2,53,26,0,94,126,220,22,0,5,204,17,2,161,78,0,97,232,180,65,0,0,0,
++0,0,0,0,0,0,0,0,0,2,53,32,0,93,124,213,36,4,123,188,17,0,53,173,63,101,176,204,31,0,3,0,
++0,0,0,0,0,0,0,0,0,0,35,98,0,0,164,55,0,0,87,0,0,0,0,0,0,0,0,0,0,0,0,0,
++0,0,0,0,0,0,0,0,0,23,186,0,0,184,26,36,220,0,0,216,40,36,220,0,0,216,40,36,235,2,16,244,
++40,36,239,206,186,211,32,36,208,8,3,4,0,20,166,0,0,0,0,0,0,8,12,9,0,20,200,255,194,218,45,122,
++255,255,60,140,56,121,255,255,60,140,56,19,197,255,60,140,56,0,0,137,60,140,56,0,0,136,60,140,56,0,0,136,
++60,140,56,0,0,136,60,140,56,0,0,108,43,112,40,13,38,80,170,0,0,0,0,0,21,8,0,0,107,127,1,0,
++124,159,8,0,14,29,0,35,223,144,0,1,65,144,0,0,64,144,0,32,198,222,55,0,0,0,0,0,0,0,0,0,
++0,0,0,0,17,2,0,114,134,176,9,176,3,136,42,70,151,140,2,0,0,0,0,0,0,0,0,0,0,0,0,0,
++0,0,0,43,35,51,28,0,55,192,72,177,0,3,231,29,237,9,84,142,100,126,0,11,5,13,3,0,0,14,29,0,
++0,0,26,0,0,35,223,144,0,0,13,202,3,0,1,65,144,0,0,136,89,0,0,0,64,144,0,35,190,0,31,6,
++32,198,222,55,174,52,24,243,58,0,0,0,67,157,0,163,175,60,0,0,3,197,24,88,194,200,128,0,0,96,118,0,
++19,56,163,80,0,0,14,2,0,0,0,0,0,0,14,29,0,0,0,26,0,0,0,35,223,144,0,0,13,202,3,0,
++0,1,65,144,0,0,136,89,0,0,0,0,64,144,0,35,190,16,56,10,0,32,198,222,55,174,52,139,137,187,0,0,
++0,0,67,157,0,0,47,180,0,0,0,3,197,24,0,25,189,26,0,0,0,96,118,0,0,177,209,175,12,0,0,14,
++2,0,0,0,0,0,0,2,53,32,0,0,0,26,0,0,93,124,213,36,0,13,202,3,0,4,123,188,17,0,136,89,
++0,0,0,53,173,63,35,190,0,31,6,101,176,204,31,174,52,24,243,58,0,3,0,67,157,0,163,175,60,0,0,3,
++197,24,88,194,200,128,0,0,96,118,0,19,56,163,80,0,0,14,2,0,0,0,0,0,0,36,195,0,0,0,6,61,
++0,0,0,17,143,0,0,3,168,78,0,0,131,139,0,0,0,184,105,8,78,52,54,194,215,159,29,0,0,81,3,0,
++0,0,0,0,0,109,123,0,0,0,0,0,0,0,71,0,0,0,0,0,0,14,237,88,0,0,0,0,0,115,167,205,
++0,0,0,0,3,219,26,185,64,0,0,0,86,168,0,77,177,0,0,0,200,193,144,146,255,37,0,57,221,72,72,72,
++154,148,0,152,92,0,0,0,15,226,2,5,0,0,0,0,0,5,0,0,0,0,0,67,14,0,0,0,0,0,37,186,
++7,0,0,0,0,0,52,19,0,0,0,0,0,14,237,88,0,0,0,0,0,115,167,205,0,0,0,0,3,219,26,185,
++64,0,0,0,86,168,0,77,177,0,0,0,200,193,144,146,255,37,0,57,221,72,72,72,154,148,0,152,92,0,0,0,
++15,226,2,5,0,0,0,0,0,5,0,0,0,0,95,24,0,0,0,0,0,98,145,175,2,0,0,0,0,62,12,49,
++12,0,0,0,0,14,237,88,0,0,0,0,0,115,167,205,0,0,0,0,3,219,26,185,64,0,0,0,86,168,0,77,
++177,0,0,0,200,193,144,146,255,37,0,57,221,72,72,72,154,148,0,152,92,0,0,0,15,226,2,5,0,0,0,0,
++0,5,0,0,0,34,13,0,29,0,0,0,55,166,180,149,134,0,0,0,22,4,12,35,3,0,0,0,0,14,237,88,
++0,0,0,0,0,115,167,205,0,0,0,0,3,219,26,185,64,0,0,0,86,168,0,77,177,0,0,0,200,193,144,146,
++255,37,0,57,221,72,72,72,154,148,0,152,92,0,0,0,15,226,2,5,0,0,0,0,0,5,0,0,0,0,0,0,
++0,0,0,0,0,160,55,201,11,0,0,0,0,1,12,1,0,0,0,0,0,14,237,88,0,0,0,0,0,115,167,205,
++0,0,0,0,3,219,26,185,64,0,0,0,86,168,0,77,177,0,0,0,200,193,144,146,255,37,0,57,221,72,72,72,
++154,148,0,152,92,0,0,0,15,226,2,5,0,0,0,0,0,5,0,0,0,56,145,114,0,0,0,0,0,112,58,148,
++0,0,0,0,0,6,105,34,0,0,0,0,0,14,237,88,0,0,0,0,0,115,167,205,0,0,0,0,3,219,26,185,
++64,0,0,0,86,168,0,77,177,0,0,0,200,193,144,146,255,37,0,57,221,72,72,72,154,148,0,152,92,0,0,0,
++15,226,2,5,0,0,0,0,0,5,0,0,0,0,0,8,12,12,12,11,0,0,0,0,66,254,222,200,200,199,64,0,
++0,6,209,181,91,0,0,0,0,0,0,125,131,92,145,0,0,0,0,0,34,216,10,36,255,216,216,211,27,0,182,207,
++144,144,255,6,0,0,0,83,202,72,72,72,210,53,0,0,0,213,42,0,0,0,119,242,216,215,67,5,0,0,0,0,
++0,0,0,0,0,0,0,0,15,17,0,0,0,45,205,217,220,201,30,8,222,83,0,0,54,18,69,205,0,0,0,0,
++0,100,177,0,0,0,0,0,74,208,0,0,0,0,0,8,225,96,0,0,64,24,0,45,202,253,234,188,28,0,0,0,
++133,120,0,0,0,0,2,130,157,1,0,0,20,64,0,0,0,0,11,191,30,0,0,0,8,35,48,12,1,32,243,200,
++200,200,71,44,212,0,0,0,0,44,212,0,0,0,0,44,249,216,216,212,32,44,212,0,0,0,0,44,212,0,0,0,
++0,30,242,216,216,216,74,0,0,0,5,76,0,0,0,0,133,97,0,0,8,12,71,12,1,32,243,200,200,200,71,44,
++212,0,0,0,0,44,212,0,0,0,0,44,249,216,216,212,32,44,212,0,0,0,0,44,212,0,0,0,0,30,242,216,
++216,216,74,0,0,28,90,0,0,0,4,179,150,88,0,0,25,56,13,73,1,32,243,200,200,200,71,44,212,0,0,0,
++0,44,212,0,0,0,0,44,249,216,216,212,32,44,212,0,0,0,0,44,212,0,0,0,0,30,242,216,216,216,74,0,
++0,0,0,0,0,0,20,195,63,149,0,0,8,13,12,13,1,32,243,200,200,200,71,44,212,0,0,0,0,44,212,0,
++0,0,0,44,249,216,216,212,32,44,212,0,0,0,0,44,212,0,0,0,0,30,242,216,216,216,74,12,72,0,0,5,
++184,42,0,0,16,54,0,0,37,212,0,0,44,220,0,0,44,220,0,0,44,220,0,0,44,220,0,0,44,220,0,0,
++35,208,0,0,0,4,0,0,1,80,0,114,116,0,70,0,37,212,0,44,220,0,44,220,0,44,220,0,44,220,0,44,
++220,0,35,208,0,0,4,0,0,20,98,0,1,170,142,107,9,52,10,62,0,37,212,0,0,44,220,0,0,44,220,0,
++0,44,220,0,0,44,220,0,0,44,220,0,0,35,208,0,0,0,4,0,0,0,0,0,6,210,44,167,0,1,10,1,
++0,37,212,0,0,44,220,0,0,44,220,0,0,44,220,0,0,44,220,0,0,44,220,0,0,35,208,0,0,0,4,0,
++0,0,8,12,5,0,0,0,0,0,32,246,208,216,217,109,1,0,0,44,220,0,0,26,205,101,0,0,44,220,0,0,
++0,76,200,0,11,237,255,200,153,0,45,229,0,0,44,220,0,0,0,82,198,0,0,44,220,0,0,34,211,96,0,0,
++30,244,220,221,208,100,0,0,0,0,33,15,0,29,0,0,48,169,178,150,139,0,0,32,5,0,34,5,8,37,234,28,
++0,0,81,149,44,254,196,4,0,88,156,44,200,148,140,0,88,156,44,200,6,202,78,88,156,44,200,0,32,222,120,156,
++44,200,0,0,78,255,156,35,191,0,0,0,138,148,0,4,0,0,0,0,4,0,0,65,18,0,0,0,0,0,0,67,
++165,0,0,0,0,0,0,0,77,16,0,0,0,0,48,208,207,223,185,23,0,8,223,74,0,0,141,182,0,69,200,0,
++0,0,13,253,19,100,174,0,0,0,0,238,39,74,208,0,0,0,15,250,8,8,226,92,0,2,145,164,0,0,46,205,
++226,224,167,17,0,0,0,0,12,3,0,0,0,0,0,0,0,46,36,0,0,0,0,0,12,192,25,0,0,0,0,0,
++39,54,0,0,0,0,48,208,207,223,185,23,0,8,223,74,0,0,141,182,0,69,200,0,0,0,13,253,19,100,174,0,
++0,0,0,238,39,74,208,0,0,0,15,250,8,8,226,92,0,2,145,164,0,0,46,205,226,224,167,17,0,0,0,0,
++12,3,0,0,0,0,0,0,74,44,0,0,0,0,0,54,164,185,17,0,0,0,0,54,25,46,32,0,0,0,48,208,
++207,223,185,23,0,8,223,74,0,0,141,182,0,69,200,0,0,0,13,253,19,100,174,0,0,0,0,238,39,74,208,0,
++0,0,15,250,8,8,226,92,0,2,145,164,0,0,46,205,226,224,167,17,0,0,0,0,12,3,0,0,0,0,0,25,
++23,0,29,0,0,0,20,177,167,156,164,0,0,0,11,15,18,45,9,0,0,0,48,208,207,223,185,23,0,8,223,74,
++0,0,141,182,0,69,200,0,0,0,13,253,19,100,174,0,0,0,0,238,39,74,208,0,0,0,15,250,8,8,226,92,
++0,2,145,164,0,0,46,205,226,224,167,17,0,0,0,0,12,3,0,0,0,0,0,0,0,0,0,0,0,0,0,114,
++101,160,51,0,0,0,0,1,18,18,0,0,0,0,48,208,207,223,185,23,0,8,223,74,0,0,141,182,0,69,200,0,
++0,0,13,253,19,100,174,0,0,0,0,238,39,74,208,0,0,0,15,250,8,8,226,92,0,2,145,164,0,0,46,205,
++226,224,167,17,0,0,0,0,12,3,0,0,0,2,6,0,0,5,1,32,192,17,17,191,30,0,58,191,192,57,0,0,
++16,195,195,16,0,12,189,57,58,189,12,15,45,0,0,45,15,0,0,0,18,16,52,38,0,0,48,208,207,228,255,52,
++0,8,223,74,0,111,255,182,0,69,200,0,20,203,20,253,19,100,174,0,153,78,0,238,39,74,208,48,183,0,15,250,
++8,8,227,255,41,2,145,164,0,0,135,255,226,224,167,17,0,0,65,15,12,3,0,0,0,0,0,81,3,0,0,0,
++0,0,113,119,0,0,0,0,10,0,59,0,4,6,49,200,0,0,0,113,132,56,208,0,0,0,120,140,56,208,0,0,
++0,120,140,56,208,0,0,0,120,140,44,220,0,0,0,132,131,9,236,60,0,14,211,77,0,74,221,218,234,144,0,0,
++0,0,14,5,0,0,0,0,0,0,69,13,0,0,0,0,39,185,6,0,0,10,0,42,17,4,6,49,200,0,0,0,
++113,132,56,208,0,0,0,120,140,56,208,0,0,0,120,140,56,208,0,0,0,120,140,44,220,0,0,0,132,131,9,236,
++60,0,14,211,77,0,74,221,218,234,144,0,0,0,0,14,5,0,0,0,0,0,96,22,0,0,0,0,102,143,173,1,
++0,0,10,62,0,51,14,6,49,200,0,0,0,113,132,56,208,0,0,0,120,140,56,208,0,0,0,120,140,56,208,0,
++0,0,120,140,44,220,0,0,0,132,131,9,236,60,0,14,211,77,0,74,221,218,234,144,0,0,0,0,14,5,0,0,
++0,0,0,0,0,0,0,0,0,164,51,204,8,0,0,10,1,0,1,4,6,49,200,0,0,0,113,132,56,208,0,0,
++0,120,140,56,208,0,0,0,120,140,56,208,0,0,0,120,140,44,220,0,0,0,132,131,9,236,60,0,14,211,77,0,
++74,221,218,234,144,0,0,0,0,14,5,0,0,0,0,0,27,54,0,0,0,1,180,49,0,12,0,6,53,0,12,178,
++100,0,0,78,192,34,231,40,26,226,42,0,92,208,193,105,0,0,0,180,195,0,0,0,0,124,140,0,0,0,0,124,
++140,0,0,0,0,114,130,0,0,0,0,1,2,0,0,0,6,0,0,0,0,0,34,210,0,0,0,0,0,44,249,208,
++206,178,57,0,44,220,4,6,70,234,5,44,220,0,0,0,236,23,44,231,84,86,150,202,0,44,238,128,127,98,11,0,
++33,202,0,0,0,0,0,0,0,0,0,0,0,0,0,0,12,17,0,0,0,0,142,198,195,145,0,0,41,218,1,42,
++209,0,0,74,184,12,200,58,0,0,76,184,72,196,5,0,0,76,184,6,147,221,110,0,76,184,10,0,17,244,4,67,
++174,117,202,197,153,0,0,4,0,5,9,0,0,0,106,29,0,0,0,66,154,0,0,0,0,87,0,0,23,183,199,195,
++41,5,22,0,89,150,26,163,162,205,176,118,145,0,106,176,38,211,177,164,167,0,0,10,0,4,0,0,0,112,21,0,
++0,32,185,1,0,0,55,31,0,23,183,199,195,41,5,22,0,89,150,26,163,162,205,176,118,145,0,106,176,38,211,177,
++164,167,0,0,10,0,4,0,0,132,49,0,0,70,140,176,0,0,76,5,67,13,23,183,199,195,41,5,22,0,89,150,
++26,163,162,205,176,118,145,0,106,176,38,211,177,164,167,0,0,10,0,4,0,36,37,0,43,6,178,150,180,85,1,13,
++0,8,0,23,183,199,195,41,5,22,0,89,150,26,163,162,205,176,118,145,0,106,176,38,211,177,164,167,0,0,10,0,
++4,0,2,0,2,0,0,143,69,186,23,0,0,0,0,0,23,183,199,195,41,5,22,0,89,150,26,163,162,205,176,118,
++145,0,106,176,38,211,177,164,167,0,0,10,0,4,0,35,143,110,0,0,101,49,148,0,0,8,113,57,0,23,183,199,
++195,41,5,22,0,89,150,26,163,162,205,176,118,145,0,106,176,38,211,177,164,167,0,0,10,0,4,23,183,200,201,102,
++196,191,104,0,5,23,0,90,242,17,2,199,21,26,162,162,205,252,160,160,185,38,118,145,0,104,237,10,0,9,0,37,
++209,178,167,100,211,186,197,17,0,0,13,0,0,4,14,0,0,2,144,210,200,65,90,189,5,9,18,139,124,0,0,0,
++104,177,0,0,3,7,177,234,205,72,0,0,147,106,0,0,7,133,150,0,0,96,39,0,0,0,52,168,0,0,0,0,
++87,0,0,1,141,197,189,54,91,171,0,25,199,141,230,156,156,183,105,158,0,0,10,7,172,200,194,157,0,0,11,8,
++0,0,0,0,102,31,0,0,22,192,4,0,0,46,40,0,1,141,197,189,54,91,171,0,25,199,141,230,156,156,183,105,
++158,0,0,10,7,172,200,194,157,0,0,11,8,0,0,0,122,59,0,0,55,148,180,2,0,71,10,58,21,1,141,197,
++189,54,91,171,0,25,199,141,230,156,156,183,105,158,0,0,10,7,172,200,194,157,0,0,11,8,0,0,2,0,2,0,
++0,128,84,172,37,0,0,0,0,0,1,141,197,189,54,91,171,0,25,199,141,230,156,156,183,105,158,0,0,10,7,172,
++200,194,157,0,0,11,8,0,29,106,0,3,192,25,0,38,49,0,55,151,0,76,184,0,76,184,0,76,184,0,65,172,
++0,0,2,0,35,98,0,164,55,0,87,0,55,151,0,76,184,0,76,184,0,76,184,0,65,172,0,0,2,0,0,56,
++125,0,2,178,146,59,20,60,8,71,0,55,151,0,0,76,184,0,0,76,184,0,0,76,184,0,0,65,172,0,0,0,
++2,0,0,2,0,2,33,179,77,132,0,0,0,0,0,55,151,0,0,76,184,0,0,76,184,0,0,76,184,0,0,65,
++172,0,0,0,2,0,0,6,0,0,3,0,0,98,205,174,121,0,0,143,128,182,84,0,0,43,121,98,215,5,49,220,
++91,127,255,43,137,129,0,0,218,55,115,156,0,15,231,16,10,179,198,214,96,0,0,0,14,2,0,0,0,25,47,0,
++43,0,0,169,138,175,117,0,0,14,0,8,0,0,57,170,178,216,126,0,76,235,16,19,246,4,76,185,0,0,240,20,
++76,184,0,0,240,20,67,174,0,0,228,13,0,4,0,0,4,0,0,93,42,0,0,0,0,49,171,0,0,0,0,0,
++87,0,0,0,1,143,208,206,69,0,88,189,1,30,236,16,139,122,0,0,213,51,105,167,0,20,239,18,5,170,198,217,
++101,0,0,0,13,3,0,0,0,0,0,99,34,0,0,0,20,194,5,0,0,0,44,42,0,0,1,143,208,206,69,0,
++88,189,1,30,236,16,139,122,0,0,213,51,105,167,0,20,239,18,5,170,198,217,101,0,0,0,13,3,0,0,0,0,
++119,62,0,0,0,51,150,181,3,0,0,69,11,56,24,0,1,143,208,206,69,0,88,189,1,30,236,16,139,122,0,0,
++213,51,105,167,0,20,239,18,5,170,198,217,101,0,0,0,13,3,0,0,0,30,43,0,43,0,0,176,143,176,104,0,
++0,14,0,8,0,0,1,143,208,206,69,0,88,189,1,30,236,16,139,122,0,0,213,51,105,167,0,20,239,18,5,170,
++198,217,101,0,0,0,13,3,0,0,0,2,0,2,0,0,0,124,88,169,40,0,0,0,0,0,0,0,1,143,208,206,
++69,0,88,189,1,30,236,16,139,122,0,0,213,51,105,167,0,20,239,18,5,170,198,217,101,0,0,0,13,3,0,0,
++0,0,32,22,0,0,0,0,73,54,0,0,22,60,60,60,60,22,56,128,128,128,128,55,0,0,37,25,0,0,0,0,
++68,51,0,0,0,0,0,1,46,0,1,143,208,255,175,0,88,189,14,215,239,16,139,122,135,65,213,51,105,202,163,20,
++239,18,5,255,230,217,101,0,0,70,13,3,0,0,0,91,44,0,0,0,0,46,174,0,0,0,0,0,86,1,0,0,
++61,148,0,3,210,0,80,176,0,8,252,0,80,176,0,8,252,0,63,193,0,50,255,0,10,202,199,154,235,0,0,0,
++13,0,4,0,0,0,0,97,36,0,0,0,18,195,6,0,0,0,42,45,0,0,61,148,0,3,210,0,80,176,0,8,
++252,0,80,176,0,8,252,0,63,193,0,50,255,0,10,202,199,154,235,0,0,0,13,0,4,0,0,0,117,64,0,0,
++0,48,152,181,4,0,0,68,12,54,26,0,61,148,0,3,210,0,80,176,0,8,252,0,80,176,0,8,252,0,63,193,
++0,50,255,0,10,202,199,154,235,0,0,0,13,0,4,0,0,2,0,2,0,0,0,120,92,165,43,0,0,0,0,0,
++0,0,61,148,0,3,210,0,80,176,0,8,252,0,80,176,0,8,252,0,63,193,0,50,255,0,10,202,199,154,235,0,
++0,0,13,0,4,0,0,0,0,131,2,0,0,62,155,0,0,0,72,14,0,157,62,0,13,193,96,173,0,107,146,7,
++229,26,209,37,0,132,187,179,0,0,26,255,68,0,0,53,212,0,0,0,108,88,0,0,0,9,0,0,0,0,69,176,
++0,0,0,0,76,184,0,0,0,0,76,203,180,214,148,1,76,241,21,6,203,76,76,190,0,0,145,117,76,230,7,1,
++196,86,76,214,185,209,183,5,76,184,2,15,0,0,52,141,0,0,0,0,0,2,0,2,0,0,176,37,208,1,0,0,
++0,0,0,157,62,0,13,193,96,173,0,107,146,7,229,26,209,37,0,132,187,179,0,0,26,255,68,0,0,53,212,0,
++0,0,108,88,0,0,7,26,0,33,0,19,14,87,182,4,238,27,146,122,0,1,0,1,0,1,0,
++};
++static const mpgb_glyph mpgb_g_key[192] = {
++{32,0,0,3,0,3,0},{33,0,-8,2,9,2,0},{34,0,-8,4,8,4,18},{35,0,-8,6,9,6,50},{36,0,-9,6,11,6,104},{37,0,-8,9,9,9,170},{38,0,-8,7,9,7,251},{39,0,-8,2,8,2,314},
++{40,0,-8,3,10,3,330},{41,0,-8,3,10,3,360},{42,0,-8,5,8,5,390},{43,0,-6,6,6,6,430},{44,0,-2,2,4,2,466},{45,0,-4,4,4,4,474},{46,0,-2,2,3,2,490},{47,-1,-8,5,9,3,496},
++{48,0,-8,6,9,6,541},{49,0,-8,6,8,6,595},{50,0,-8,6,8,6,643},{51,0,-8,6,9,6,691},{52,0,-8,6,9,6,745},{53,0,-8,6,9,6,799},{54,0,-8,6,9,6,853},{55,0,-8,6,9,6,907},
++{56,0,-8,6,9,6,961},{57,0,-8,6,9,6,1015},{58,0,-5,2,6,2,1069},{59,0,-5,2,7,2,1081},{60,0,-6,6,6,6,1095},{61,0,-5,6,5,6,1131},{62,0,-6,6,6,6,1161},{63,0,-8,5,9,4,1197},
++{64,0,-8,9,10,9,1242},{65,0,-8,8,9,7,1332},{66,0,-8,7,8,7,1404},{67,0,-8,7,9,7,1460},{68,0,-8,8,8,8,1523},{69,0,-8,6,8,6,1587},{70,0,-8,6,9,6,1635},{71,0,-8,7,9,7,1689},
++{72,0,-8,8,9,8,1752},{73,0,-8,3,9,3,1824},{74,-1,-8,4,9,3,1851},{75,0,-8,7,9,6,1887},{76,0,-8,6,8,6,1950},{77,0,-8,9,9,9,1998},{78,0,-8,7,9,7,2079},{79,0,-8,8,9,8,2142},
++{80,0,-8,7,9,6,2214},{81,0,-8,8,10,8,2277},{82,0,-8,7,9,7,2357},{83,0,-8,6,9,6,2420},{84,-1,-8,8,9,6,2474},{85,0,-8,7,9,7,2546},{86,0,-8,7,9,7,2609},{87,0,-8,11,9,11,2672},
++{88,0,-8,7,9,7,2771},{89,0,-8,6,9,6,2834},{90,0,-8,6,8,6,2888},{91,0,-8,4,10,3,2936},{92,-1,-8,5,9,3,2976},{93,0,-8,3,10,3,3021},{94,0,-7,6,7,6,3051},{95,0,0,5,1,5,3093},
++{96,0,-8,4,8,4,3098},{97,0,-5,5,6,5,3130},{98,0,-8,6,9,6,3160},{99,0,-5,5,6,5,3214},{100,0,-8,6,9,6,3244},{101,0,-5,5,6,5,3298},{102,0,-8,4,9,3,3328},{103,0,-5,6,7,6,3364},
++{104,0,-8,6,9,6,3406},{105,0,-8,2,9,2,3460},{106,-1,-8,3,10,2,3478},{107,0,-8,5,9,5,3508},{108,0,-8,4,9,3,3553},{109,0,-5,9,6,9,3589},{110,0,-5,6,6,6,3643},{111,0,-5,6,6,6,3679},
++{112,0,-5,6,7,6,3715},{113,0,-5,6,7,6,3757},{114,0,-5,4,6,4,3799},{115,0,-5,5,6,5,3823},{116,-1,-7,5,8,4,3853},{117,0,-5,6,6,6,3893},{118,0,-5,5,6,5,3929},{119,0,-5,9,6,8,3959},
++{120,0,-5,5,6,5,4013},{121,0,-5,5,7,5,4043},{122,0,-5,5,5,5,4078},{123,0,-8,4,10,4,4103},{124,0,-8,3,10,3,4143},{125,0,-8,4,10,4,4173},{126,0,-4,6,4,6,4213},{160,0,0,3,0,3,4237},
++{161,0,-5,2,7,2,4237},{162,0,-7,6,9,6,4251},{163,0,-8,6,8,6,4305},{164,0,-6,6,7,6,4353},{165,0,-8,6,9,6,4395},{166,0,-8,3,10,3,4449},{167,0,-8,6,10,6,4479},{168,0,-8,5,8,5,4539},
++{169,0,-8,8,9,8,4579},{170,0,-8,3,8,3,4651},{171,0,-5,5,5,5,4675},{172,0,-5,6,5,6,4700},{173,0,0,0,0,0,4730},{174,0,-8,8,9,8,4730},{175,0,-7,5,7,5,4802},{176,0,-8,4,8,4,4837},
++{177,0,-6,6,6,6,4869},{178,0,-8,4,8,4,4905},{179,0,-8,4,8,4,4937},{180,0,-8,4,8,4,4969},{181,0,-5,6,7,6,5001},{182,0,-8,6,10,6,5043},{183,0,-4,2,4,2,5103},{184,0,-1,4,3,4,5111},
++{185,0,-8,4,8,4,5123},{186,0,-8,4,8,3,5155},{187,0,-5,5,5,5,5187},{188,0,-8,9,9,9,5212},{189,0,-8,10,9,9,5293},{190,0,-8,9,9,9,5383},{191,0,-5,5,7,4,5464},{192,0,-10,8,11,7,5499},
++{193,0,-10,8,11,7,5587},{194,0,-10,8,11,7,5675},{195,0,-10,8,11,7,5763},{196,0,-10,8,11,7,5851},{197,0,-10,8,11,7,5939},{198,0,-8,10,9,10,6027},{199,0,-8,7,10,7,6117},{200,0,-10,6,10,6,6187},
++{201,0,-10,6,10,6,6247},{202,0,-10,6,10,6,6307},{203,0,-10,6,10,6,6367},{204,-1,-10,4,11,3,6427},{205,0,-10,3,11,3,6471},{206,-1,-10,4,11,3,6504},{207,-1,-10,4,11,3,6548},{208,-1,-8,9,8,8,6592},
++{209,0,-10,7,11,7,6664},{210,0,-10,8,11,8,6741},{211,0,-10,8,11,8,6829},{212,0,-10,8,11,8,6917},{213,0,-10,8,11,8,7005},{214,0,-10,8,11,8,7093},{215,0,-6,6,6,6,7181},{216,0,-8,8,9,8,7217},
++{217,0,-10,7,11,7,7289},{218,0,-10,7,11,7,7366},{219,0,-10,7,11,7,7443},{220,0,-10,7,11,7,7520},{221,0,-10,6,11,6,7597},{222,0,-8,7,9,6,7663},{223,0,-8,7,9,6,7726},{224,0,-8,5,9,5,7789},
++{225,0,-8,5,9,5,7834},{226,0,-8,5,9,5,7879},{227,0,-8,5,9,5,7924},{228,0,-8,5,9,5,7969},{229,0,-8,5,9,5,8014},{230,0,-5,9,6,9,8059},{231,0,-5,5,7,5,8113},{232,0,-8,5,9,5,8148},
++{233,0,-8,5,9,5,8193},{234,0,-8,5,9,5,8238},{235,0,-8,5,9,5,8283},{236,-1,-8,3,9,2,8328},{237,0,-8,3,9,2,8355},{238,-1,-8,4,9,2,8382},{239,-1,-8,4,9,2,8418},{240,0,-8,6,9,6,8454},
++{241,0,-8,6,9,6,8508},{242,0,-8,6,9,6,8562},{243,0,-8,6,9,6,8616},{244,0,-8,6,9,6,8670},{245,0,-8,6,9,6,8724},{246,0,-8,6,9,6,8778},{247,0,-6,6,6,6,8832},{248,0,-6,6,7,6,8868},
++{249,0,-8,6,9,6,8910},{250,0,-8,6,9,6,8964},{251,0,-8,6,9,6,9018},{252,0,-8,6,9,6,9072},{253,0,-8,5,10,5,9126},{254,0,-8,6,10,6,9176},{255,0,-8,5,10,5,9236},{8230,0,-2,7,3,7,9286},
++};
++static const mpgb_font mpgb_font_key = { mpgb_g_key, 192, mpgb_px_key, 11, 4 };
++
++#endif
+diff --git a/gambatte_sdl/mpgb_ui.cpp b/gambatte_sdl/mpgb_ui.cpp
+new file mode 100644
+index 0000000..32e6dc5
+--- /dev/null
++++ b/gambatte_sdl/mpgb_ui.cpp
+@@ -0,0 +1,542 @@
++/* MeuPocketGB: minimalist menus drawn straight on the 320x240 screen.
++ * See mpgb_ui.h. Layout units follow a 320x240 grid: 10 px margins,
++ * 30 px rows, 30 px pills, hints row at y = 200.
++ */
++#include "mpgb_ui.h"
++#include "mpgb_fonte.h"
++
++#include <gambatte.h>
++#include "src/blitterwrapper.h"
++#include "menu.h"
++
++#include <math.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <fstream>
++#include <vector>
++
++extern void init_border(SDL_Surface *dst); // src/sdlblitter.cpp
++
++namespace {
++
++const int W = 320, H = 240;
++const Uint8 C_WHITE[3] = {255, 255, 255}, C_BLACK[3] = {0, 0, 0}, C_GRAY[3] = {40, 40, 40},
++            C_LIGHT[3] = {200, 200, 200}, C_DIM[3] = {130, 130, 130}, C_HELP[3] = {190, 190, 190},
++            C_LOW[3] = {255, 80, 80};
++
++/* ---------- pixels ---------- */
++
++inline Uint32 get_px(SDL_Surface *s, int x, int y) {
++	Uint8 *p = (Uint8 *)s->pixels + y * s->pitch + x * s->format->BytesPerPixel;
++	return s->format->BytesPerPixel == 2 ? *(Uint16 *)p : *(Uint32 *)p;
++}
++
++inline void set_px(SDL_Surface *s, int x, int y, Uint32 c) {
++	Uint8 *p = (Uint8 *)s->pixels + y * s->pitch + x * s->format->BytesPerPixel;
++	if (s->format->BytesPerPixel == 2)
++		*(Uint16 *)p = (Uint16)c;
++	else
++		*(Uint32 *)p = c;
++}
++
++// alpha 0..255; surface must be locked
++inline void blend(SDL_Surface *s, int x, int y, const Uint8 *c, int a) {
++	if (a <= 0 || x < 0 || y < 0 || x >= s->w || y >= s->h)
++		return;
++	if (a >= 255) {
++		set_px(s, x, y, SDL_MapRGB(s->format, c[0], c[1], c[2]));
++		return;
++	}
++	Uint8 r, g, b;
++	SDL_GetRGB(get_px(s, x, y), s->format, &r, &g, &b);
++	r += (c[0] - r) * a / 255;
++	g += (c[1] - g) * a / 255;
++	b += (c[2] - b) * a / 255;
++	set_px(s, x, y, SDL_MapRGB(s->format, r, g, b));
++}
++
++void fill(SDL_Surface *s, int x, int y, int w, int h, const Uint8 *c) {
++	SDL_Rect r = { (Sint16)x, (Sint16)y, (Uint16)w, (Uint16)h };
++	SDL_FillRect(s, &r, SDL_MapRGB(s->format, c[0], c[1], c[2]));
++}
++
++struct Lock {
++	SDL_Surface *s;
++	explicit Lock(SDL_Surface *s) : s(s) { if (SDL_MUSTLOCK(s)) SDL_LockSurface(s); }
++	~Lock() { if (SDL_MUSTLOCK(s)) SDL_UnlockSurface(s); }
++};
++
++// rounded rectangle with smooth edges; rad = h / 2 gives a pill
++void rrect(SDL_Surface *s, int x, int y, int w, int h, int rad, const Uint8 *c) {
++	if (w <= 0 || h <= 0)
++		return;
++	if (rad * 2 > h) rad = h / 2;
++	if (rad * 2 > w) rad = w / 2;
++	fill(s, x + rad, y, w - 2 * rad, h, c);        // middle band
++	fill(s, x, y + rad, rad, h - 2 * rad, c);       // left band
++	fill(s, x + w - rad, y + rad, rad, h - 2 * rad, c);
++	Lock lock(s);
++	for (int py = 0; py < h; ++py) {
++		if (py >= rad && py < h - rad)
++			continue;
++		float cy = py + 0.5f, ccy = cy < rad ? rad : h - rad;
++		for (int px = 0; px < w; ++px) {
++			if (px >= rad && px < w - rad)
++				continue;
++			float cx = px + 0.5f, ccx = cx < rad ? rad : w - rad;
++			float d = sqrtf((cx - ccx) * (cx - ccx) + (cy - ccy) * (cy - ccy));
++			float cov = rad - d + 0.5f;
++			if (cov > 0)
++				blend(s, x + px, y + py, c, cov >= 1 ? 255 : (int)(cov * 255));
++		}
++	}
++}
++
++/* ---------- text ---------- */
++
++const mpgb_glyph *glyph(const mpgb_font &f, unsigned cp) {
++	// tables are sorted: 32..126, 160..255, U+2026
++	if (cp >= 32 && cp <= 126) return &f.g[cp - 32];
++	if (cp >= 160 && cp <= 255) return &f.g[95 + cp - 160];
++	if (cp == 0x2026) return &f.g[f.n - 1];
++	return &f.g['?' - 32];
++}
++
++// UTF-8 (falls back to Latin-1 for stray bytes, e.g. names from a FAT card)
++std::vector<unsigned> decode(const std::string &s) {
++	std::vector<unsigned> out;
++	for (size_t i = 0; i < s.size();) {
++		unsigned char c = s[i];
++		if (c < 0x80) { out.push_back(c); ++i; continue; }
++		int n = (c & 0xE0) == 0xC0 ? 1 : (c & 0xF0) == 0xE0 ? 2 : (c & 0xF8) == 0xF0 ? 3 : -1;
++		unsigned cp = n == 1 ? c & 0x1F : n == 2 ? c & 0x0F : c & 0x07;
++		bool ok = n > 0 && i + n < s.size() + 1;
++		for (int k = 1; ok && k <= n; ++k) {
++			if (i + k >= s.size() || (s[i + k] & 0xC0) != 0x80) ok = false;
++			else cp = (cp << 6) | (s[i + k] & 0x3F);
++		}
++		if (ok) { out.push_back(cp); i += n + 1; }
++		else { out.push_back(c); ++i; }
++	}
++	return out;
++}
++
++int width(const mpgb_font &f, const std::vector<unsigned> &t) {
++	int w = 0;
++	for (size_t i = 0; i < t.size(); ++i) w += glyph(f, t[i])->adv;
++	return w;
++}
++
++int width(const mpgb_font &f, const std::string &s) { return width(f, decode(s)); }
++
++int cap_height(const mpgb_font &f) { return -glyph(f, 'H')->y; }
++
++// draws with the baseline at by; returns the advance
++int text_at(SDL_Surface *s, const mpgb_font &f, int x, int by, const std::vector<unsigned> &t, const Uint8 *c) {
++	Lock lock(s);
++	int pen = x;
++	for (size_t i = 0; i < t.size(); ++i) {
++		const mpgb_glyph *g = glyph(f, t[i]);
++		const uint8_t *px = f.px + g->off;
++		for (int yy = 0; yy < g->h; ++yy)
++			for (int xx = 0; xx < g->w; ++xx)
++				blend(s, pen + g->x + xx, by + g->y + yy, c, px[yy * g->w + xx]);
++		pen += g->adv;
++	}
++	return pen - x;
++}
++
++// text vertically centred in [y, y + h)
++int text(SDL_Surface *s, const mpgb_font &f, int x, int y, int h, const std::string &str, const Uint8 *c) {
++	return text_at(s, f, x, y + (h + cap_height(f) + 1) / 2, decode(str), c);
++}
++
++std::string fit(const mpgb_font &f, const std::string &str, int maxw) {
++	std::vector<unsigned> t = decode(str);
++	if (width(f, t) <= maxw)
++		return str;
++	int ell = glyph(f, 0x2026)->adv;
++	while (!t.empty() && width(f, t) + ell > maxw)
++		t.pop_back();
++	while (!t.empty() && t.back() == ' ')
++		t.pop_back();
++	std::string out;
++	for (size_t i = 0; i < t.size(); ++i) {
++		unsigned cp = t[i];
++		if (cp < 0x80) out += (char)cp;
++		else if (cp < 0x800) { out += (char)(0xC0 | (cp >> 6)); out += (char)(0x80 | (cp & 0x3F)); }
++		else { out += (char)(0xE0 | (cp >> 12)); out += (char)(0x80 | ((cp >> 6) & 0x3F)); out += (char)(0x80 | (cp & 0x3F)); }
++	}
++	return out + "\xE2\x80\xA6";
++}
++
++/* ---------- components ---------- */
++
++int battery_percent() {
++	static Uint32 last = 0;
++	static int pct = 100;
++	Uint32 now = SDL_GetTicks();
++	if (last && now - last < 5000)
++		return pct;
++	last = now ? now : 1;
++	FILE *f = fopen("/sys/class/power_supply/miyoo-battery/voltage_now", "r");
++	if (!f)
++		return pct;
++	int mv = 0;
++	if (fscanf(f, "%d", &mv) == 1 && mv > 0) {
++		if (mv > 100000) mv /= 1000; // reported in uV on some kernels
++		pct = (mv - 3300) * 100 / (4100 - 3300);
++		if (pct < 0) pct = 0;
++		if (pct > 100) pct = 100;
++	}
++	fclose(f);
++	return pct;
++}
++
++void battery(SDL_Surface *s) {
++	rrect(s, W - 40, 10, 30, 30, 15, C_GRAY);
++	int x = W - 34, y = 20, bw = 15, bh = 10;
++	const Uint8 *c = battery_percent() <= 15 ? C_LOW : C_WHITE;
++	fill(s, x, y, bw, 1, c);
++	fill(s, x, y + bh - 1, bw, 1, c);
++	fill(s, x, y, 1, bh, c);
++	fill(s, x + bw - 1, y, 1, bh, c);
++	fill(s, x + bw, y + 3, 2, 4, c);
++	int inner = (bw - 4) * battery_percent() / 100;
++	if (inner > 0)
++		fill(s, x + 2, y + 2, inner, bh - 4, c);
++}
++
++struct Hint { const char *key, *label; };
++
++// one dark pill with "[A] ABRIR [B] VOLTAR" style hints, right aligned (or left)
++void hints(SDL_Surface *s, const Hint *h, int n, bool right = true) {
++	const int pad = 4, gap = 8;
++	int total = pad * 2 + 6, kw[4];
++	for (int i = 0; i < n; ++i) {
++		kw[i] = strcmp(h[i].key, "<>") == 0 ? 30 : (width(mpgb_font_key, h[i].key) + 12 > 22 ? width(mpgb_font_key, h[i].key) + 12 : 22);
++		total += kw[i] + 4 + width(mpgb_font_hint, h[i].label) + (i ? gap : 0);
++	}
++	int x = right ? W - 10 - total : 10;
++	rrect(s, x, 200, total, 30, 15, C_GRAY);
++	x += pad;
++	for (int i = 0; i < n; ++i) {
++		rrect(s, x, 204, kw[i], 22, 11, C_LIGHT);
++		if (strcmp(h[i].key, "<>") == 0) {
++			Lock lock(s);
++			int cx = x + kw[i] / 2;
++			for (int col = 0; col < 5; ++col) // two small triangles: tips out, 6 px apart
++				for (int yy = -col; yy <= col; ++yy) {
++					blend(s, cx - 8 + col, 215 + yy, C_GRAY, 255);
++					blend(s, cx + 8 - col, 215 + yy, C_GRAY, 255);
++				}
++		} else {
++			int tw = width(mpgb_font_key, h[i].key);
++			text(s, mpgb_font_key, x + (kw[i] - tw) / 2, 204, 22, h[i].key, C_GRAY);
++		}
++		x += kw[i] + 4;
++		x += text(s, mpgb_font_hint, x, 200, 30, h[i].label, C_WHITE) + gap;
++	}
++}
++
++// keeps the selection inside the visible window; returns the first visible row
++int scroll(menu_t *m, int visible) {
++	if (m->mpgb_top > m->selected_entry) m->mpgb_top = m->selected_entry;
++	if (m->selected_entry >= m->mpgb_top + visible) m->mpgb_top = m->selected_entry - visible + 1;
++	if (m->mpgb_top > m->n_entries - visible) m->mpgb_top = m->n_entries - visible;
++	if (m->mpgb_top < 0) m->mpgb_top = 0;
++	return m->mpgb_top;
++}
++
++void rows(SDL_Surface *s, menu_t *m, int top, int visible, int x, int maxw, int rowh = 30) {
++	int first = scroll(m, visible);
++	for (int i = first; i < m->n_entries && i < first + visible; ++i) {
++		menu_entry_t *e = m->entries[i];
++		if (!e->text || !*e->text)
++			continue;
++		int y = top + (i - first) * rowh;
++		std::string t = fit(mpgb_font_item, e->text, maxw - 20);
++		if (i == m->selected_entry && e->selectable) {
++			rrect(s, x, y, width(mpgb_font_item, t) + 20, rowh, rowh / 2, C_WHITE);
++			text(s, mpgb_font_item, x + 10, y, rowh, t, C_BLACK);
++		} else {
++			text(s, mpgb_font_item, x + 10, y, rowh, t, e->selectable ? C_WHITE : C_DIM);
++		}
++	}
++}
++
++/* ---------- in-game background and save state preview ---------- */
++
++SDL_Surface *game_bg = 0;
++SDL_Surface *screen = 0; // set by menu_set_screen() whenever the video mode changes
++
++void preview(SDL_Surface *s, int slot) {
++	const int bx = W - 10 - 130, by = 50, bw = 130, bh = 132;
++	rrect(s, bx, by, bw, bh, 6, C_WHITE);
++	const int px = bx + 5, py = by + 5, pw = 120, ph = 108; // 80x72 thumbnail at 1.5x
++	uint32_t thumb[80 * 72];
++	std::ifstream file(getSaveStateFilename(slot).c_str(), std::ios_base::binary);
++	bool have = false;
++	if (file) {
++		file.ignore(5);
++		have = (bool)file.read(reinterpret_cast<char *>(thumb), sizeof thumb);
++	}
++	if (have) {
++		Lock lock(s);
++		for (int y = 0; y < ph; ++y)
++			for (int x = 0; x < pw; ++x) {
++				uint32_t v = thumb[(y * 2 / 3) * 80 + x * 2 / 3];
++				Uint8 c[3] = { (Uint8)(v >> 16), (Uint8)(v >> 8), (Uint8)v };
++				blend(s, px + x, py + y, c, 255);
++			}
++	} else {
++		fill(s, px, py, pw, ph, C_GRAY);
++		int tw = width(mpgb_font_hint, "Vazio");
++		text(s, mpgb_font_hint, px + (pw - tw) / 2, py, ph, "Vazio", C_DIM);
++	}
++	for (int i = 0; i < 10; ++i) { // slot dots
++		int cx = bx + 20 + i * 10, cy = by + bh - 9, r = i == slot ? 3 : 2;
++		rrect(s, cx - r, cy - r, r * 2, r * 2, r, i == slot ? C_BLACK : C_DIM);
++	}
++}
++
++/* ---------- screens ---------- */
++
++void draw_roms(SDL_Surface *s, menu_t *m) {
++	rows(s, m, 10, 6, 10, 270);
++	battery(s);
++	bool error = m->title && *m->title && strcmp(m->title, "Jogos") != 0;
++	if (error) { // load error: a light pill bottom-left with the reason
++		std::string t = fit(mpgb_font_hint, m->title, 150);
++		int tw = width(mpgb_font_hint, t);
++		rrect(s, 10, 200, tw + 20, 30, 15, C_LIGHT);
++		text(s, mpgb_font_hint, 20, 200, 30, t, C_BLACK);
++	} else if (m->n_entries > 0 && m->entries[0]->selectable) {
++		char buf[24];
++		snprintf(buf, sizeof buf, "%d/%d", m->selected_entry + 1, m->n_entries);
++		text(s, mpgb_font_hint, 14, 200, 30, buf, C_DIM);
++	}
++	if (gambatte_p->isLoaded()) {
++		Hint h[] = { { "B", "VOLTAR" }, { "A", "ABRIR" } };
++		hints(s, h, 2);
++	} else {
++		Hint h[] = { { "A", "ABRIR" } };
++		hints(s, h, 1);
++	}
++}
++
++void draw_game(SDL_Surface *s, menu_t *m) {
++	if (game_bg)
++		SDL_BlitSurface(game_bg, NULL, s, NULL);
++	std::string title = fit(mpgb_font_item, m->title ? m->title : "", W - 80);
++	rrect(s, 10, 10, width(mpgb_font_item, title) + 20, 30, 15, C_BLACK);
++	text(s, mpgb_font_item, 20, 10, 30, title, C_WHITE);
++	battery(s);
++	rows(s, m, 46, 5, 10, 165);
++	menu_entry_t *e = m->entries[m->selected_entry];
++	if (e->mpgb_slot)
++		preview(s, e->selected_entry);
++	if (e->mpgb_slot) {
++		Hint h[] = { { "<>", "ESCOLHER" }, { "A", "OK" } };
++		hints(s, h, 2);
++	} else {
++		Hint h[] = { { "B", "VOLTAR" }, { "A", "OK" } };
++		hints(s, h, 2);
++	}
++}
++
++void draw_options(SDL_Surface *s, menu_t *m) {
++	const char *title = m->title ? m->title : "";
++	while (*title == ' ') ++title;
++	std::string t(title);
++	while (!t.empty() && t[t.size() - 1] == ' ') t.erase(t.size() - 1);
++	text(s, mpgb_font_item, (W - width(mpgb_font_item, t)) / 2, 10, 30, t, C_WHITE);
++	battery(s);
++	const int top = 44, rowh = 24, visible = 5, x0 = 30, x1 = W - 30;
++	int first = scroll(m, visible);
++	for (int i = first; i < m->n_entries && i < first + visible; ++i) {
++		menu_entry_t *e = m->entries[i];
++		int y = top + (i - first) * rowh;
++		bool sel = i == m->selected_entry;
++		std::string value = e->is_shiftable && e->n_entries > 0 ? e->entries[e->selected_entry] : "";
++		int vw = value.empty() ? 0 : width(mpgb_font_hint, value) + 10;
++		std::string label = fit(mpgb_font_item, e->text ? e->text : "", x1 - x0 - 20 - vw);
++		if (sel) {
++			if (!value.empty())
++				rrect(s, x0, y, x1 - x0, rowh, rowh / 2, C_GRAY);
++			rrect(s, x0, y, width(mpgb_font_item, label) + 20, rowh, rowh / 2, C_WHITE);
++		}
++		text(s, mpgb_font_item, x0 + 10, y, rowh, label, sel ? C_BLACK : C_WHITE);
++		if (!value.empty())
++			text(s, mpgb_font_hint, x1 - 10 - width(mpgb_font_hint, value), y, rowh, value, C_WHITE);
++	}
++	menu_entry_t *e = m->entries[m->selected_entry];
++	if (e->mpgb_help) {
++		std::string help = fit(mpgb_font_hint, e->mpgb_help, W - 20);
++		text(s, mpgb_font_hint, (W - width(mpgb_font_hint, help)) / 2, 166, 30, help, C_HELP);
++	}
++	if (e->is_shiftable) {
++		Hint h[] = { { "B", "VOLTAR" }, { "<>", "MUDAR" } };
++		hints(s, h, 2);
++	} else {
++		Hint h[] = { { "B", "VOLTAR" }, { "A", "OK" } };
++		hints(s, h, 2);
++	}
++}
++
++void draw_list(SDL_Surface *s, menu_t *m) {
++	const char *title = m->title ? m->title : "";
++	while (*title == ' ') ++title;
++	std::string t(title);
++	while (!t.empty() && t[t.size() - 1] == ' ') t.erase(t.size() - 1);
++	if (!t.empty()) {
++		t = fit(mpgb_font_item, t, W - 80);
++		rrect(s, 10, 10, width(mpgb_font_item, t) + 20, 30, 15, C_GRAY);
++		text(s, mpgb_font_item, 20, 10, 30, t, C_WHITE);
++	}
++	battery(s);
++	rows(s, m, 46, 5, 10, W - 20);
++	Hint h[] = { { "B", "VOLTAR" }, { "A", "OK" } };
++	hints(s, h, 2);
++}
++
++} // namespace
++
++void mpgb_ui_set_screen(SDL_Surface *s) { screen = s; }
++
++void mpgb_ui_draw(SDL_Surface *s, menu_t *menu) {
++	SDL_FillRect(s, NULL, SDL_MapRGB(s->format, 0, 0, 0));
++	if (!menu || menu->n_entries <= 0)
++		return;
++	switch (menu->mpgb_kind) {
++	case MPGB_KIND_ROMS: draw_roms(s, menu); break;
++	case MPGB_KIND_GAME: draw_game(s, menu); break;
++	case MPGB_KIND_OPTIONS: draw_options(s, menu); break;
++	default: draw_list(s, menu); break;
++	}
++}
++
++void mpgb_ui_capture_game() {
++	if (!screen)
++		return;
++	if (!game_bg || game_bg->format->BitsPerPixel != screen->format->BitsPerPixel) {
++		if (game_bg)
++			SDL_FreeSurface(game_bg);
++		SDL_PixelFormat *f = screen->format;
++		game_bg = SDL_CreateRGBSurface(SDL_SWSURFACE, W, H, f->BitsPerPixel, f->Rmask, f->Gmask, f->Bmask, 0);
++		if (!game_bg)
++			return;
++	}
++	BlitterWrapper::Buf buf = blitter_p->inBuf();
++	Lock lock(game_bg);
++	// GB frame 160x144 at 2x, cropped to 240 lines, at 30% of the brightness
++	for (int y = 0; y < H; ++y) {
++		const gambatte::uint_least32_t *line = buf.pixels + ((y + 24) / 2) * buf.pitch;
++		for (int x = 0; x < W; ++x) {
++			uint32_t v = line[x / 2];
++			set_px(game_bg, x, y, SDL_MapRGB(game_bg->format, ((v >> 16) & 0xFF) * 30 / 100,
++			                                 ((v >> 8) & 0xFF) * 30 / 100, (v & 0xFF) * 30 / 100));
++		}
++	}
++}
++
++void mpgb_ui_restore_game_screen() {
++	if (!screen)
++		return;
++	for (int i = 0; i < 3; ++i) { // the screen may be double or triple buffered
++		init_border(screen);
++		SDL_Flip(screen);
++	}
++}
++
++std::string mpgb_display_name(const std::string &file) {
++	std::string n = file;
++	std::string::size_type slash = n.rfind('/');
++	if (slash != std::string::npos)
++		n = n.substr(slash + 1);
++	std::string::size_type dot = n.rfind('.');
++	if (dot != std::string::npos && dot > 0)
++		n = n.substr(0, dot);
++	std::string out; // drop "(USA, Europe)", "[T-En ...]" and similar tags
++	int depth = 0;
++	for (size_t i = 0; i < n.size(); ++i) {
++		char c = n[i];
++		if (c == '(' || c == '[') { ++depth; continue; }
++		if ((c == ')' || c == ']') && depth > 0) { --depth; continue; }
++		if (depth == 0)
++			out += c;
++	}
++	std::string clean; // collapse spaces
++	for (size_t i = 0; i < out.size(); ++i)
++		if (!(out[i] == ' ' && (clean.empty() || clean[clean.size() - 1] == ' ')))
++			clean += out[i];
++	while (!clean.empty() && clean[clean.size() - 1] == ' ')
++		clean.erase(clean.size() - 1);
++	if (clean.empty())
++		return n;
++	// "Legend of Zelda, The - Link's Awakening" -> "The Legend of Zelda - Link's Awakening"
++	const char *arts[] = { ", The", ", A", ", An" };
++	for (int k = 0; k < 3; ++k) {
++		std::string a = arts[k];
++		std::string::size_type at = clean.find(a);
++		if (at == std::string::npos)
++			continue;
++		std::string::size_type end = at + a.size();
++		if (end == clean.size() || clean.compare(end, 3, " - ") == 0) {
++			clean = a.substr(2) + " " + clean.substr(0, at) + clean.substr(end);
++			break;
++		}
++	}
++	return clean;
++}
++
++#ifdef MPGB_TEST
++/* PC tests only (compiled with -DMPGB_TEST, never in the firmware):
++ *   MPGB_TECLAS="ESPERA:120,MENU,BAIXO,A,..."  keys fed one per call
++ *   MPGB_CAPTURAS=/folder                      every menu redraw saved as BMP
++ * Keys: CIMA BAIXO ESQ DIREITA A B MENU START SELECT FIM; ESPERA:n skips n calls.
++ */
++void mpgb_test_feed_keys() {
++	static std::vector<std::string> keys;
++	static size_t pos = 0;
++	static int wait = 0;
++	static bool loaded = false;
++	if (!loaded) {
++		loaded = true;
++		const char *env = getenv("MPGB_TECLAS");
++		std::string s = env ? env : "", cur;
++		for (size_t i = 0; i <= s.size(); ++i) {
++			if (i == s.size() || s[i] == ',') { if (!cur.empty()) keys.push_back(cur); cur.clear(); }
++			else cur += s[i];
++		}
++	}
++	if (wait > 0) { --wait; return; }
++	if (pos >= keys.size())
++		return;
++	std::string k = keys[pos++];
++	if (k.compare(0, 7, "ESPERA:") == 0) { wait = atoi(k.c_str() + 7); return; }
++	if (k == "FIM") { SDL_Event q; q.type = SDL_QUIT; SDL_PushEvent(&q); return; }
++	SDLKey sym = k == "CIMA" ? SDLK_UP : k == "BAIXO" ? SDLK_DOWN : k == "ESQ" ? SDLK_LEFT : k == "DIREITA" ? SDLK_RIGHT
++	           : k == "A" ? SDLK_LALT : k == "B" ? SDLK_LCTRL : k == "MENU" ? SDLK_RCTRL : k == "START" ? SDLK_RETURN
++	           : k == "SELECT" ? SDLK_ESCAPE : SDLK_UNKNOWN;
++	if (sym == SDLK_UNKNOWN)
++		return;
++	SDL_Event e;
++	memset(&e, 0, sizeof e);
++	e.type = SDL_KEYDOWN; e.key.state = SDL_PRESSED; e.key.keysym.sym = sym;
++	SDL_PushEvent(&e);
++	e.type = SDL_KEYUP; e.key.state = SDL_RELEASED;
++	SDL_PushEvent(&e);
++}
++
++void mpgb_test_capture(SDL_Surface *s) {
++	static int n = 0;
++	const char *dir = getenv("MPGB_CAPTURAS");
++	if (!dir)
++		return;
++	char path[512];
++	snprintf(path, sizeof path, "%s/tela-%03d.bmp", dir, n++);
++	SDL_SaveBMP(s, path);
++}
++#endif
+diff --git a/gambatte_sdl/mpgb_ui.h b/gambatte_sdl/mpgb_ui.h
+new file mode 100644
+index 0000000..c3fa569
+--- /dev/null
++++ b/gambatte_sdl/mpgb_ui.h
+@@ -0,0 +1,38 @@
++/* MeuPocketGB: minimalist menus drawn straight on the 320x240 screen
++ * (black background, white text, the selected item in a white pill, button
++ * hints at the bottom). Look inspired by MinUI; all code and the Nunito font
++ * (SIL OFL 1.1) are our own / freely licensed.
++ */
++#ifndef MPGB_UI_H
++#define MPGB_UI_H
++
++#include <SDL/SDL.h>
++#include <string>
++#include "libmenu.h"
++
++// menu_t::mpgb_kind
++enum {
++	MPGB_KIND_LIST = 0,    // generic list with a title pill (cheats, confirmations...)
++	MPGB_KIND_ROMS = 1,    // the game list
++	MPGB_KIND_GAME = 2,    // in-game menu over the paused game, save state preview
++	MPGB_KIND_OPTIONS = 3  // label + value changed with left/right, help line
++};
++
++// Screen surface (menu_set_screen passes it on).
++void mpgb_ui_set_screen(SDL_Surface *s);
++// Draws the whole menu screen (does not flip).
++void mpgb_ui_draw(SDL_Surface *s, menu_t *menu);
++// Keeps a darkened copy of the paused game as the in-game menu background.
++void mpgb_ui_capture_game();
++// After a menu closes: clear the leftover menu pixels and repaint the border.
++void mpgb_ui_restore_game_screen();
++// "Legend of Zelda, The - Link's Awakening DX (USA, Europe) (Rev A).gbc"
++//   -> "The Legend of Zelda - Link's Awakening DX"
++std::string mpgb_display_name(const std::string &file);
++
++#ifdef MPGB_TEST
++void mpgb_test_feed_keys();
++void mpgb_test_capture(SDL_Surface *s);
++#endif
++
++#endif
+diff --git a/gambatte_sdl/src/gambatte_sdl.cpp b/gambatte_sdl/src/gambatte_sdl.cpp
+index fdee865..d7e3132 100644
+--- a/gambatte_sdl/src/gambatte_sdl.cpp
++++ b/gambatte_sdl/src/gambatte_sdl.cpp
+@@ -44,6 +44,9 @@
+ #include <sys/types.h>
+ #include <sys/stat.h>
+ #include "../menu.h"
++#ifdef MPGB_TEST
++#include "../mpgb_ui.h"
++#endif
+ 
+ bool get_bootloader_from_file(void* userdata, bool isgbc, uint8_t* data, uint32_t buf_size)
+ {
+@@ -1065,6 +1068,9 @@ bool GambatteSdl::handleEvents(BlitterWrapper &blitter) {
+ 	JoyData jd;
+ 	SDL_Event e;
+ 	
++#ifdef MPGB_TEST
++	mpgb_test_feed_keys();
++#endif
+ 	while (SDL_PollEvent(&e)) {
+ 		if(refreshkeys == 1){
+ 			refreshkeys = 0;
+diff --git a/gambatte_sdl/src/sdlblitter.cpp b/gambatte_sdl/src/sdlblitter.cpp
+index 2135f22..8f1b540 100644
+--- a/gambatte_sdl/src/sdlblitter.cpp
++++ b/gambatte_sdl/src/sdlblitter.cpp
+@@ -425,6 +425,9 @@ void store_lastframe(SDL_Surface *surface) {
+ }
+ 
+ void anim_menuin(SDL_Surface *surface) { 
++#ifdef MEUPOCKETGB
++	return; // no slide animations: menus are drawn on the whole screen
++#endif
+ 	
+ 	if(menuin == 0){
+ 		if(gambatte_p->isCgb()){
+@@ -457,6 +460,10 @@ void anim_menuin(SDL_Surface *surface) {
+ }
+ 
+ void anim_menuout(SDL_Surface *surface) { 
++#ifdef MEUPOCKETGB
++	menuout = -1;
++	return;
++#endif
+ 
+ 	if(menuout >= 0){
+ 		if((firstframe >= 0) && (firstframe <= 15)){ // when new game has just been loaded, delay for 15 frames

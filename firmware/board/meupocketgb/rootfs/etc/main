@@ -23,26 +23,34 @@ GAMBATTE=/usr/bin/gambatte-meupocketgb
 # marca <step> [percent]: kernel-log marker + boot screen progress bar
 marca(){ echo "meupocketgb: $1" > /dev/kmsg 2>/dev/null; test -n "$2" && progresso "$2"; }
 
-# Boot screen: console name (ASCII art from /etc/tela-boot.txt, the same
-# drawing u-boot shows as an image before) and a progress bar on row 28.
-# Text console is 40x30 (8x8 font). Only text is written: costs a few ms.
+# Boot screen: console name + progress bar, the same picture u-boot shows
+# before (boot/gerar-tela-boot.py makes both). Written straight to the
+# framebuffer (RGB565 320x240): the whole frame once, then only the 6 bar rows
+# at each step (dd of 3840 bytes at row 150 = block 25). Costs a few ms.
 TELA=false
+FB=/dev/fb0
+TELA_DIR=/usr/share/meupocketgb
 tela_boot(){
 	test "x${DEBUG_MSG}" = "xyes" && return   # first boot / debug: keep the logs visible
+	test -w "$FB" || return
 	TELA=true
-	printf '\033[?25l\033[2J\033[H\033[1;37m'   # hide cursor, clear, bright white
-	cat /etc/tela-boot.txt
+	printf '\033[?25l'   # hide the console cursor, it would blink over the picture
+	cat "$TELA_DIR/tela-boot.rgb565" > "$FB" 2>/dev/null
 }
 progresso(){
 	$TELA || return 0
-	n=$(( $1 / 5 )); i=0; b=""
-	while test $i -lt 20; do
-		if test $i -lt $n; then b="${b}#"; else b="${b}."; fi
-		i=$((i + 1))
-	done
-	printf '\033[28;7H\033[1;32m[%s] %3d%%\033[0;30m' "$b" "$1"
+	n=$1
+	test "$1" -lt 100 && n="0$1"
+	test "$1" -lt 10 && n="00$1"
+	dd if="$TELA_DIR/barra-$n.rgb565" of="$FB" bs=3840 seek=25 count=1 conv=notrunc 2>/dev/null
 }
 marca "inicio do /etc/main"
+
+# Screen brightness: the kernel starts at full (like u-boot, see the kernel dts
+# patch); apply the saved level now instead of waiting ~1 s for miyoo-daemon,
+# so the boot screen keeps one brightness. The daemon still handles the hotkeys.
+LID_SYS=/sys/devices/platform/backlight/backlight/backlight/brightness
+test -r "${HOME}/.backlight.conf" && test -w "$LID_SYS" && cat "${HOME}/.backlight.conf" > "$LID_SYS" 2>/dev/null
 
 LOGS=/dev/null
 LOGS_TEMP=/dev/null

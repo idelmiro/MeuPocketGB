@@ -1,0 +1,236 @@
+MeuPocketGB: lista de jogos por pasta (opcional)
+
+Opcoes > Lista de jogos: "Tudo junto" (padrao, todas as ROMs numa lista) ou
+"Por pasta": as pastas aparecem primeiro (GB = "Game Boy", GBC = "Game Boy
+Color"), A abre a pasta, B volta, e o rodape mostra a pasta e o contador.
+Pelo "Sair" do menu do jogo a lista abre na pasta do jogo atual. A escolha
+fica em ~/.gambatte/meupocketgb.cfg (lista=tudo | lista=pastas).
+
+diff --git a/gambatte_sdl/menu.cpp b/gambatte_sdl/menu.cpp
+index a51075e..02c287e 100644
+--- a/gambatte_sdl/menu.cpp
++++ b/gambatte_sdl/menu.cpp
+@@ -869,11 +869,111 @@ static bool mpgb_open_rom(const std::string &fullgamepath, bool resume) {
+ }
+ 
+ static bool mpgb_list_reopen = false;
++static int mpgb_last_selected = 0;     // row selected in the game list
++
++/* ---- optional folder view (Opções > Lista de jogos > Por pasta) ---- */
++static int mpgb_list_by_folder = 0;      // 0 = one list with every game (default)
++static std::string mpgb_list_dir;        // folder view: folder shown now, "" = top
++static std::string mpgb_highlight;       // path to select when the list reopens
++
++static std::string mpgb_cfg_path() { return homedir + "/.gambatte/meupocketgb.cfg"; }
++
++static void mpgb_load_list_mode() {
++    mpgb_list_by_folder = 0;
++    FILE *f = fopen(mpgb_cfg_path().c_str(), "r");
++    if (!f)
++        return;
++    char line[128];
++    while (fgets(line, sizeof line, f))
++        if (strncmp(line, "lista=pastas", 12) == 0)
++            mpgb_list_by_folder = 1;
++    fclose(f);
++}
++
++static void mpgb_save_list_mode() {
++    std::string path = mpgb_cfg_path(), tmp = path + ".tmp";
++    FILE *f = fopen(tmp.c_str(), "w");
++    if (!f)
++        return;
++    fprintf(f, "lista=%s\n", mpgb_list_by_folder ? "pastas" : "tudo");
++    fclose(f);
++    mpgb_commit_file(tmp, path);
++}
++
++// "GB" -> "Game Boy", "GBC" -> "Game Boy Color", other folders keep their name
++static std::string mpgb_folder_label(const std::string &dir) {
++    std::string n = mpgb_basename(dir);
++    if (strcasecmp(n.c_str(), "GB") == 0) return "Game Boy";
++    if (strcasecmp(n.c_str(), "GBC") == 0) return "Game Boy Color";
++    return n;
++}
++
++static bool mpgb_folder_has_roms(const std::string &dir) {
++    DIR *d = opendir(dir.c_str());
++    if (!d)
++        return false;
++    bool found = false;
++    struct dirent *e;
++    while (!found && (e = readdir(d)) != NULL)
++        if (e->d_name[0] != '.' && mpgb_is_rom(e->d_name))
++            found = true;
++    closedir(d);
++    return found;
++}
++
++// one folder: its subfolders with games (only at the top, as "path/") then its games
++static void mpgb_scan_folder(const std::string &dir, bool with_folders) {
++    std::vector<std::string> folders, files;
++    DIR *d = opendir(dir.c_str());
++    if (!d)
++        return;
++    struct dirent *e;
++    while ((e = readdir(d)) != NULL) {
++        if (e->d_name[0] == '.')
++            continue;
++        std::string full = dir + "/" + e->d_name;
++        struct stat st;
++        if (stat(full.c_str(), &st) != 0)
++            continue;
++        if (S_ISDIR(st.st_mode)) {
++            if (with_folders && mpgb_folder_has_roms(full))
++                folders.push_back(full + "/");
++        } else if (S_ISREG(st.st_mode) && mpgb_is_rom(e->d_name)) {
++            files.push_back(full);
++        }
++    }
++    closedir(d);
++    std::sort(folders.begin(), folders.end());
++    std::sort(files.begin(), files.end(), mpgb_less);
++    mpgb_roms.insert(mpgb_roms.end(), folders.begin(), folders.end());
++    mpgb_roms.insert(mpgb_roms.end(), files.begin(), files.end());
++}
++
++static void mpgb_cb_list_back(menu_t *menu) {
++    if (mpgb_list_by_folder && !mpgb_list_dir.empty()) { // B inside a folder: go up
++        mpgb_highlight = mpgb_list_dir + "/";
++        mpgb_list_dir.clear();
++        mpgb_list_reopen = true;
++        playMenuSound_back();
++        menu->quit = 1;
++        return;
++    }
++    callback_back(menu);
++}
+ 
+ static void mpgb_callback_selected(menu_t *caller_menu) {
+     int idx = caller_menu->selected_entry;
+     if (idx < 0 || idx >= (int)mpgb_roms.size())
+         return;
++    const std::string &item = mpgb_roms[idx];
++    if (!item.empty() && item[item.size() - 1] == '/') { // a folder (folder view)
++        playMenuSound_in();
++        mpgb_list_dir = item.substr(0, item.size() - 1);
++        mpgb_last_selected = 0;
++        mpgb_list_reopen = true;
++        caller_menu->quit = 1;
++        return;
++    }
+     playMenuSound_ok();
+     SDL_Delay(250);
+     if (gambatte_p->isLoaded()) {
+@@ -890,7 +990,6 @@ static void mpgb_callback_selected(menu_t *caller_menu) {
+     caller_menu->quit = 1;
+ }
+ 
+-static int mpgb_last_selected = 0;
+ 
+ static void mpgb_show_rom_list(menu_t *caller_menu) {
+   bool first = true;
+@@ -901,19 +1000,34 @@ static void mpgb_show_rom_list(menu_t *caller_menu) {
+ 
+     mpgb_roms.clear();
+     std::string romdir = mpgb_romdir();
+-    mpgb_scan(romdir, 1);
+-    std::sort(mpgb_roms.begin(), mpgb_roms.end(), mpgb_less);
++    if (mpgb_list_by_folder) {
++        if (first) { // from the game menu: open the folder of the game running now
++            mpgb_list_dir.clear();
++            std::string::size_type slash = mpgb_current_rom.rfind('/');
++            if (!mpgb_current_rom.empty() && slash != std::string::npos && mpgb_current_rom.substr(0, slash) != romdir
++                    && mpgb_current_rom.compare(0, romdir.size() + 1, romdir + "/") == 0)
++                mpgb_list_dir = mpgb_current_rom.substr(0, slash);
++        }
++        mpgb_scan_folder(mpgb_list_dir.empty() ? romdir : mpgb_list_dir, mpgb_list_dir.empty());
++    } else {
++        mpgb_list_dir.clear();
++        mpgb_scan(romdir, 1);
++        std::sort(mpgb_roms.begin(), mpgb_roms.end(), mpgb_less);
++    }
+     if (first) // start on the game running now; after an error stay on the failed one
+-        for (std::size_t i = 0; i < mpgb_roms.size(); ++i)
+-            if (mpgb_roms[i] == mpgb_current_rom)
+-                mpgb_last_selected = (int)i;
++        mpgb_highlight = mpgb_current_rom;
++    for (std::size_t i = 0; i < mpgb_roms.size() && !mpgb_highlight.empty(); ++i)
++        if (mpgb_roms[i] == mpgb_highlight)
++            mpgb_last_selected = (int)i;
++    mpgb_highlight.clear();
+     first = false;
+ 
+     menu = new_menu();
+     menu->mpgb_kind = MPGB_KIND_ROMS;
+-    menu_set_header(menu, menu_main_title.c_str());
++    // header: folder shown now (folder view), next to the counter at the bottom
++    menu_set_header(menu, mpgb_list_dir.empty() ? "" : mpgb_folder_label(mpgb_list_dir).c_str());
+     menu_set_title(menu, mpgb_last_error.empty() ? "Jogos" : mpgb_last_error.c_str());
+-    menu->back_callback = callback_back;
++    menu->back_callback = mpgb_cb_list_back;
+ 
+     if (mpgb_roms.empty()) {
+         menu_entry = new_menu_entry(0);
+@@ -928,7 +1042,10 @@ static void mpgb_show_rom_list(menu_t *caller_menu) {
+     } else {
+         for (std::size_t i = 0; i < mpgb_roms.size(); ++i) {
+             menu_entry = new_menu_entry(0);
+-            menu_entry_set_text(menu_entry, mpgb_display_name(mpgb_roms[i]).c_str());
++            const std::string &item = mpgb_roms[i];
++            bool folder = !item.empty() && item[item.size() - 1] == '/';
++            menu_entry_set_text(menu_entry, folder ? mpgb_folder_label(item.substr(0, item.size() - 1)).c_str()
++                                                   : mpgb_display_name(item).c_str());
+             menu_add_entry(menu, menu_entry);
+             menu_entry->callback = mpgb_callback_selected;
+         }
+@@ -1032,6 +1149,11 @@ static void mpgb_apply_bios(const std::string &, int i) { biosenabled = i; }
+ static void mpgb_apply_sound(const std::string &, int i) { stereosound = i; }
+ static void mpgb_apply_buttons(const std::string &, int i) { buttonlayout = i; refreshkeys = 1; }
+ static void mpgb_apply_fps(const std::string &, int i) { showfps = i; }
++static void mpgb_apply_list_mode(const std::string &, int i) {
++    mpgb_list_by_folder = i;
++    mpgb_list_dir.clear();
++    mpgb_save_list_mode();
++}
+ 
+ static void mpgb_cb_option_shift(menu_t *menu) {
+     int i = menu->selected_entry;
+@@ -1179,6 +1301,11 @@ static void mpgb_cb_options(menu_t *caller_menu) {
+         const char *s[] = { "Desligado", "Ligado" };
+         mpgb_add_choice(menu, "Mostrar FPS", "Quadros por segundo no canto da tela.", s, 2, showfps, mpgb_apply_fps);
+     }
++    {
++        const char *s[] = { "Tudo junto", "Por pasta" };
++        mpgb_add_choice(menu, "Lista de jogos", "Todos os jogos numa lista, ou separados por pasta (GB, GBC...).",
++                        s, 2, mpgb_list_by_folder, mpgb_apply_list_mode);
++    }
+     mpgb_add_action(menu, "Reiniciar jogo", "Volta o jogo para o começo (o save do jogo fica).", mpgb_cb_restart);
+     mpgb_add_action(menu, "Códigos", "Game Genie e GameShark.", callback_cheats);
+ 
+@@ -1245,6 +1372,7 @@ static void mpgb_main_menu() {
+ }
+ 
+ void rom_browser_startup() {
++    mpgb_load_list_mode();
+     SDL_EnableKeyRepeat(250, 83);
+     switchToMenuAudio();
+     // boot-time marker in the kernel log, with the same clock as dmesg
+diff --git a/gambatte_sdl/mpgb_ui.cpp b/gambatte_sdl/mpgb_ui.cpp
+index 32e6dc5..30b55e7 100644
+--- a/gambatte_sdl/mpgb_ui.cpp
++++ b/gambatte_sdl/mpgb_ui.cpp
+@@ -315,9 +315,11 @@ void draw_roms(SDL_Surface *s, menu_t *m) {
+ 	} else if (m->n_entries > 0 && m->entries[0]->selectable) {
+ 		char buf[24];
+ 		snprintf(buf, sizeof buf, "%d/%d", m->selected_entry + 1, m->n_entries);
+-		text(s, mpgb_font_hint, 14, 200, 30, buf, C_DIM);
++		std::string where = m->header && *m->header ? std::string(m->header) + "  \xC2\xB7  " + buf : buf;
++		text(s, mpgb_font_hint, 14, 200, 30, fit(mpgb_font_hint, where, 150), C_DIM);
+ 	}
+-	if (gambatte_p->isLoaded()) {
++	bool in_folder = m->header && *m->header;
++	if (gambatte_p->isLoaded() || in_folder) {
+ 		Hint h[] = { { "B", "VOLTAR" }, { "A", "ABRIR" } };
+ 		hints(s, h, 2);
+ 	} else {

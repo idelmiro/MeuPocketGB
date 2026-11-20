@@ -1,59 +1,74 @@
 #!/usr/bin/env python3
-"""Draws the boot screen u-boot shows (tela-boot.bmp) from the same text the
-console draws later (rootfs/etc/tela-boot.txt), with the kernel's 8x8 font,
-so the picture does not change when the kernel takes over the screen.
+"""Draws the MeuPocketGB boot screen (console name + progress bar, same look as
+the menus: Nunito font, black background, white text, pill-shaped bar).
 
-Usage: gerar-tela-boot.py <linux>/lib/fonts/font_8x8.c rootfs/etc/tela-boot.txt boot/tela-boot.bmp
-
-Layout (must match the progresso() function in rootfs/etc/main):
-  40x30 text cells of 8x8 pixels on the 320x240 screen, art in bright white,
-  progress bar on row 28 / column 7 in bright green, shown at 0%.
-u-boot only draws 4/8/24-bit BMPs: this writes an 8-bit one.
+Usage: gerar-tela-boot.py "emulador/ui/Nunito[wght].ttf" firmware/board/meupocketgb
+Writes (all 320x240, the same picture):
+  boot/tela-boot.bmp                          u-boot splash (8-bit BMP: u-boot's CFB
+                                              only draws 4/8/24-bit), bar at 0 %
+  rootfs/usr/share/meupocketgb/tela-boot.rgb565   whole frame for /dev/fb0
+  rootfs/usr/share/meupocketgb/barra-NNN.rgb565   just the bar rows, per percent
+/etc/main writes the frame once the kernel turns the screen on, then one bar
+strip per boot step (dd ... bs=STRIP seek=BAR_Y/BAR_H): no text console used.
+Needs Pillow; run again only when the drawing changes.
 """
-import re
+import os
 import struct
 import sys
+from PIL import Image, ImageDraw, ImageFont
 
-W, H, CELL = 320, 240, 8
-BLACK, WHITE, GREEN = 0, 1, 2
-# Linux console colours 15 (bright white) and 10 (bright green)
-PALETTE = {BLACK: (0, 0, 0), WHITE: (0xFF, 0xFF, 0xFF), GREEN: (0x55, 0xFF, 0x55)}
-BAR_ROW, BAR_COL = 28, 7
-
-
-def load_font(path):
-    data = [int(m, 16) for m in re.findall(r'^\s*(0x[0-9a-fA-F]{2}),', open(path).read(), re.M)]
-    if len(data) != 256 * 8:
-        sys.exit(f"{path}: esperava 2048 bytes de fonte, achei {len(data)}")
-    return data
+TTF, BOARD = sys.argv[1], sys.argv[2]
+W, H, SS = 320, 240, 4
+NAME = 'PocketGo'
+BAR_X, BAR_Y, BAR_W, BAR_H = 110, 150, 100, 6       # BAR_Y is a multiple of BAR_H (dd seek)
+PERCENTS = (0, 10, 25, 30, 40, 50, 80, 100)        # values used by /etc/main
+GRAY = (40, 40, 40)
 
 
-def main():
-    font_c, art_txt, out_bmp = sys.argv[1:4]
-    font = load_font(font_c)
-    pix = bytearray(W * H)
+def frame(pct):
+    im = Image.new('RGB', (W * SS, H * SS), (0, 0, 0))
+    d = ImageDraw.Draw(im)
+    f = ImageFont.truetype(TTF, 30 * SS)
+    f.set_variation_by_name('Black')
+    d.text((W / 2 * SS, 104 * SS), NAME, font=f, fill=(255, 255, 255), anchor='mm')
+    r = BAR_H * SS // 2
+    d.rounded_rectangle([BAR_X * SS, BAR_Y * SS, (BAR_X + BAR_W) * SS - 1, (BAR_Y + BAR_H) * SS - 1], radius=r, fill=GRAY)
+    if pct:
+        w = max(BAR_H, BAR_W * pct // 100)
+        d.rounded_rectangle([BAR_X * SS, BAR_Y * SS, (BAR_X + w) * SS - 1, (BAR_Y + BAR_H) * SS - 1], radius=r,
+                            fill=(255, 255, 255))
+    return im.resize((W, H), Image.LANCZOS)
 
-    def put_text(row, col, text, color):  # row/col are 1-based, like the console
-        for i, ch in enumerate(text):
-            x0, y0 = (col - 1 + i) * CELL, (row - 1) * CELL
-            if x0 >= W or y0 >= H:
-                continue
-            glyph = font[ord(ch) * 8: ord(ch) * 8 + 8]
-            for dy, bits in enumerate(glyph):
-                for dx in range(8):
-                    if bits & (0x80 >> dx):
-                        pix[(y0 + dy) * W + x0 + dx] = color
 
-    for row, line in enumerate(open(art_txt).read().split('\n'), start=1):
-        put_text(row, 1, line, WHITE)
-    put_text(BAR_ROW, BAR_COL, '[' + '.' * 20 + ']   0%', GREEN)
+def rgb565(im, y0=0, y1=H):
+    out = bytearray()
+    px = im.load()
+    for y in range(y0, y1):
+        for x in range(W):
+            r, g, b = px[x, y]
+            out += struct.pack('<H', ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3))
+    return bytes(out)
 
-    pal = b''.join(struct.pack('<BBBB', *reversed(PALETTE.get(i, (0, 0, 0))), 0) for i in range(256))
-    rows = b''.join(bytes(pix[y * W:(y + 1) * W]) for y in reversed(range(H)))  # BMP is bottom-up
+
+def bmp8(im, path):  # grey levels only (white / grey / black): 8-bit grey palette
+    grey = im.convert('L')
+    pal = b''.join(struct.pack('<BBBB', i, i, i, 0) for i in range(256))
+    rows = b''.join(grey.tobytes()[y * W:(y + 1) * W] for y in reversed(range(H)))
     off = 14 + 40 + len(pal)
     hdr = b'BM' + struct.pack('<IHHI', off + len(rows), 0, 0, off)
     dib = struct.pack('<IiiHHIIiiII', 40, W, H, 1, 8, 0, len(rows), 2835, 2835, 256, 0)
-    open(out_bmp, 'wb').write(hdr + dib + pal + rows)
+    open(path, 'wb').write(hdr + dib + pal + rows)
+
+
+def main():
+    share = os.path.join(BOARD, 'rootfs/usr/share/meupocketgb')
+    os.makedirs(share, exist_ok=True)
+    first = frame(0)
+    bmp8(first, os.path.join(BOARD, 'boot/tela-boot.bmp'))
+    open(os.path.join(share, 'tela-boot.rgb565'), 'wb').write(rgb565(first))
+    for pct in PERCENTS:
+        strip = rgb565(frame(pct), BAR_Y, BAR_Y + BAR_H)
+        open(os.path.join(share, 'barra-%03d.rgb565' % pct), 'wb').write(strip)
 
 
 if __name__ == '__main__':
