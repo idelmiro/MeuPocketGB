@@ -135,6 +135,11 @@ fonte é a Nunito (SIL OFL 1.1).
 
 Assim como eles, este projeto é distribuído sob a licença **GPL-2.0**.
 
+O MeuPocketGB foi desenvolvido em parceria com o **Claude** (modelo **Opus 5.5**, da
+Anthropic), usado pelo Claude Code. A ideia, as decisões e todos os testes no console de
+verdade foram do autor; o Claude escreveu e ajustou o código, os patches do emulador, do
+kernel e do u-boot, mediu o tempo de boot e investigou os problemas encontrados pelo caminho.
+
 ---
 
 <details>
