@@ -3,7 +3,7 @@
 **Transforme o seu PocketGo num Game Boy Color de bolso.**
 
 <p align="center">
-  <img src="docs/tela-boot.png" alt="Tela de boot do MeuPocketGB" width="320">
+  <img src="docs/pocketgo-menu-do-jogo.svg" alt="PocketGo com o MeuPocketGB mostrando o menu do jogo" width="640">
 </p>
 
 O PocketGo (Bittboy, primeira versão) costuma vir com um sistema que roda dezenas de
@@ -30,6 +30,37 @@ Você liga, e o jogo continua de onde parou. Como era com o cartucho.
 - 🎨 **Cores de Game Boy.** O verdinho original, as 12 paletas que o Game Boy Color
   oferecia para jogos antigos (ou a escolha automática, como o GBC fazia), correção de
   cor da tela do GBC e o "rastro" de imagem da tela original.
+
+## Como fica na tela
+
+Capturas reais do sistema (com jogos homebrew livres que já vêm no cartão):
+
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <img src="docs/pocketgo-boot.svg" alt="Tela de boot com barra de progresso" width="100%"><br>
+      <strong>Ligando</strong><br>
+      <sub>Sem logos nem perguntas: o nome do console e uma barra de progresso.</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="docs/pocketgo-lista.svg" alt="Lista de jogos" width="100%"><br>
+      <strong>Lista de jogos</strong><br>
+      <sub>Só os seus jogos, com nomes limpos. Também dá para separar por pasta.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <img src="docs/pocketgo-menu-do-jogo.svg" alt="Menu do jogo com a miniatura do estado salvo" width="100%"><br>
+      <strong>Menu do jogo</strong><br>
+      <sub>Continuar, salvar e carregar em 10 espaços, com miniatura de cada um.</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="docs/pocketgo-opcoes.svg" alt="Opções" width="100%"><br>
+      <strong>Opções</strong><br>
+      <sub>Cada ajuste muda com esquerda/direita e vale na hora.</sub>
+    </td>
+  </tr>
+</table>
 
 ## Como começar
 
@@ -214,7 +245,8 @@ firmware/           árvore externa do Buildroot (BR2_EXTERNAL)
   board/meupocketgb/rootfs/etc/main  script de boot enxuto
   board/meupocketgb/preparar-buildroot.sh  ajustes no MiyooCFW antes de compilar
 scripts/            build-firmware.sh e build-emulador.sh
-docs/               imagens usadas neste README
+docs/               imagens deste README: telas/ (capturas reais) e as ilustrações do
+                    console, geradas por docs/gerar-ilustracoes.py
 ```
 
 ### Medir o tempo de boot
