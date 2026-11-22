@@ -1,0 +1,64 @@
+#!/bin/busybox sh
+# MeuPocketGB first boot. Replaces the MiyooCFW installer (board/miyoo/boot/firstboot):
+# this image is only for the PocketGo, so there is nothing to ask. It does just what
+# the installer did for a PocketGo with the default answers:
+#   1. device = PocketGo (console.cfg + the 4-bit bus device tree)
+#   2. format and enable the swap partition
+#   3. grow the ROMS partition (ext4) to the end of the card
+#   4. disable itself (firstboot -> firstboot.done)
+# Nothing is written to the screen (the boot screen stays up); everything goes to
+# MAIN/log_firstboot.txt. Run by /etc/main with /boot read-only, /mnt and /roms mounted.
+
+BOOTDIR=${BOOTDIR:-/boot}
+HOME=${HOME:-/mnt}
+ROMS=${ROMS:-/roms}
+CONSOLE_CFG=${CONSOLE_CFG:-${BOOTDIR}/console.cfg}
+LOG=${HOME}/log_firstboot.txt
+DISK=/dev/mmcblk0
+ROMS_PART=/dev/mmcblk0p5
+
+log() { echo "$*" >> "$LOG"; }
+run() { log "# $*"; "$@" >> "$LOG" 2>&1; }
+
+log "=== MeuPocketGB firstboot ($(date)) ==="
+run mount -o remount,rw "$BOOTDIR"
+
+# 1) device: PocketGo, like the installer's "PocketGO (default)" choice
+echo "CONSOLE_VARIANT=pocketgo" > "$CONSOLE_CFG"
+run cp "$BOOTDIR/suniv-f1c100s-miyoo-4bit.dtb" "$BOOTDIR/suniv-f1c100s-miyoo.dtb"
+
+# 2) swap (the image ships the partition empty)
+run /sbin/swapoff -a
+run /sbin/mkswap -L SWAP /dev/mmcblk0p3
+run /sbin/swapon /dev/mmcblk0p3
+
+# 3) ROMS to the whole card, when there is free space after it (sizes in 512-byte sectors)
+SD_SIZE=$(cat /sys/block/mmcblk0/size)
+P5_START=$(cat /sys/block/mmcblk0/mmcblk0p5/start)
+P5_SIZE=$(cat /sys/block/mmcblk0/mmcblk0p5/size)
+FREE=$((SD_SIZE - P5_START - P5_SIZE))
+log "card ${SD_SIZE} sectors, ROMS starts at ${P5_START}, ${P5_SIZE} sectors, ${FREE} free after it"
+if test "$FREE" -gt 32768; then # more than 16 MiB to gain
+	run umount "$ROMS_PART"
+	run sgdisk -p "$DISK"
+	# the backup GPT was written at the end of the small image: move it to the real end
+	run sgdisk -e "$DISK"
+	# recreate partition 5 at the very same start sector, ending at the end of the card
+	run sgdisk -d 5 -n "5:${P5_START}:0" -t 5:8300 -c 5:roms "$DISK"
+	run sgdisk -p "$DISK"
+	run partx -u "$DISK" || run partprobe "$DISK"
+	log "ROMS now $(cat /sys/block/mmcblk0/mmcblk0p5/size) sectors"
+	run e2fsck -f -y "$ROMS_PART"
+	run resize2fs "$ROMS_PART"
+	run mount "$ROMS_PART" "$ROMS" -o rw,noatime
+	run df -h "$ROMS"
+else
+	log "ROMS already uses the whole card"
+fi
+
+# 4) done: never run again; MAIN gets the usual link to the games
+run ln -s "$ROMS" "$HOME"
+run mv "$BOOTDIR/firstboot" "$BOOTDIR/firstboot.done"
+sync
+run mount -o remount,ro "$BOOTDIR"
+log "=== firstboot finished ==="

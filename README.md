@@ -46,10 +46,16 @@ ou nos *Artifacts* da última execução em *Actions*) e siga o
 
 Uma imagem nova do cartão, compilada só com o necessário. Baixe o
 `meupocketgb-...img.gz` e grave num microSD com o **Balena Etcher** ou o **Rufus**
-(eles aceitam o `.gz` direto). No primeiro boot aparecem algumas perguntas do
-instalador do MiyooCFW: quando ele pedir o modelo, escolha **PocketGo**. Ele ajusta
-as partições ao tamanho do cartão e reinicia. Depois disso, copie os jogos
-para a partição **ROMS** pelo PC.
+(eles aceitam o `.gz` direto) e ligue o console. O primeiro boot não faz nenhuma
+pergunta: o instalador do MiyooCFW foi trocado por um próprio
+(`firmware/board/meupocketgb/boot/firstboot`) que configura o PocketGo e aumenta a
+partição **ROMS** até o fim do cartão, com a tela de boot normal (leva alguns segundos
+a mais e não reinicia; o que ele fez fica em `MAIN/log_firstboot.txt`). Depois, copie
+os jogos para a partição **ROMS** pelo PC.
+
+> As imagens v1.0 e v1.1 ainda usavam o instalador do MiyooCFW: respondendo YES em
+> "Expand ROMS partition?" ele apagava a partição ROMS sem conseguir recriá-la.
+> Use a v1.2 ou mais nova.
 
 ## Como os arquivos são gerados
 
@@ -116,6 +122,16 @@ código é próprio e a fonte é a Nunito (SIL OFL 1.1, em `emulador/ui/`).
 - **Menu do jogo** (botão de atalho): Continuar, Salvar, Carregar, Opções, Sair. Em Salvar e
   Carregar, esquerda/direita escolhe o slot e aparece a miniatura do estado salvo.
 - **Opções:** o valor muda com esquerda/direita e vale na hora; fica salvo ao sair.
+  - *Paleta (GB):* "Original (verde)" é o padrão; há também "Cinza", as 12 paletas que o
+    Game Boy Color oferecia para jogos de GB e "Automática (GBC)", que escolhe pelo título
+    como o GBC fazia (tabela do gambatte-libretro, GPL).
+  - *Correção de cor (GBC):* só para jogos de GBC; imita as cores da tela do GBC.
+  - *Rastro de imagem:* mistura cada quadro com o anterior, como a tela do Game Boy;
+    aparece no que se move ou pisca.
+  - *Logo do Game Boy:* precisa das BIOS do console (não vêm no sistema por direitos
+    autorais). Copie as suas para `MAIN/.gambatte/bios/gb_bios.bin` (256 bytes) e
+    `gbc_bios.bin` (2304 bytes); a opção aparece nas Opções e o logo surge ao abrir um
+    jogo pela lista.
   Reiniciar jogo e Códigos (Game Genie / GameShark) ficam aqui.
 
 Para testar os menus no PC sem o console, compile com `EXTRA_DEFINES=-DMPGB_TEST`:

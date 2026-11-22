@@ -64,4 +64,11 @@ sed -i -e 's|^::sysinit:/sbin/modprobe btrfs$|#&|' \
 grep -q '^#::sysinit:/sbin/modprobe btrfs$' "$INITTAB" && grep -q '^::sysinit:/bin/mount /dev/mmcblk0p4 /mnt -o rw,noatime,exec$' "$INITTAB" \
 	|| { echo "inittab: MAIN ainda montada como btrfs" >&2; exit 1; }
 
+# 8) First boot without the MiyooCFW installer: this image is only for the
+#    PocketGo, so there are no questions (device, video tests, license,
+#    filesystems). boot/firstboot sets the PocketGo, the swap and grows ROMS
+#    to the whole card, silently, with the boot screen up.
+install -m 0755 "$HERE/boot/firstboot" board/miyoo/boot/firstboot
+grep -q '^# MeuPocketGB first boot' board/miyoo/boot/firstboot || { echo "firstboot do MeuPocketGB nao copiado" >&2; exit 1; }
+
 echo "buildroot preparado para o MeuPocketGB"

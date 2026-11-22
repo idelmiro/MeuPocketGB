@@ -4,7 +4,7 @@
 # Trimmed version of the MiyooCFW /etc/main (https://github.com/MiyooCFW/buildroot,
 # GPL-2.0). Started by init (inittab: tty1::respawn:/etc/main).
 #
-# Kept: video/sound modules, firstboot (device detection + partition setup),
+# Kept: video/sound modules, firstboot (MeuPocketGB: PocketGo setup + grow ROMS, no questions),
 #       filesystem check after an unclean power-off, hotkey daemon.
 # Removed: boot logo animation, GMenu2X, TV-out, USB gadget by default.
 # At the end it runs Gambatte, which opens straight into the game list.
@@ -60,7 +60,10 @@ GMENU2X_LOGS=/dev/null
 FRONTEND_ACTIVE=false
 test -f /tmp/frontend.active && FRONTEND_ACTIVE=true
 
-if grep -sq DEBUG\=\1 "${OPTIONS_CFG}" || test -r "${BOOTDIR}/firstboot" || test -r "${HOME}/firstboot.completed" || grep -sq FIRSTBOOT\=\1 "${OPTIONS_CFG}"; then
+# Debug mode (logs on screen and in MAIN/log.txt) only when asked in options.cfg:
+# the MeuPocketGB first boot is silent and keeps its own MAIN/log_firstboot.txt,
+# so the boot screen stays up while it prepares the card.
+if grep -sq DEBUG\=\1 "${OPTIONS_CFG}"; then
 	DEBUG_MSG="yes"
 	LOGS="${HOME}/log.txt"
 	LOGS_TEMP=$(mktemp)

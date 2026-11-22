@@ -1,0 +1,82 @@
+MeuPocketGB: sem moldura e tela cheia rapida por padrao
+
+A tela do PocketGo e pequena: a imagem do jogo ocupa a tela toda por padrao
+("FullScreen Fast", que aparece como "Tela cheia rapida" nas Opcoes) e nao
+ha mais moldura em volta do jogo. As opcoes "Moldura (GB)" e "Moldura (GBC)"
+saem das Opcoes, e a moldura fica desligada mesmo que um arquivo de
+configuracao antigo diga outra coisa. Quem ja escolheu outra escala continua
+com a sua. A ajuda de "Lista de jogos" ficou mais curta para caber na tela.
+
+diff --git a/gambatte_sdl/libmenu.cpp b/gambatte_sdl/libmenu.cpp
+index d53bcbc..8fbdc30 100644
+--- a/gambatte_sdl/libmenu.cpp
++++ b/gambatte_sdl/libmenu.cpp
+@@ -62,7 +62,10 @@ Mix_Chunk *menusound_ok = NULL;
+ int showfps = 0, ghosting = 1, biosenabled = 0, colorfilter = 0, gameiscgb = 0, buttonlayout = 0, stereosound = 1, prefercgb = 1, ffwhotkey = 1, stateautoload = 0, stateautosave = 0;
+ uint32_t menupalblack = 0x000000, menupaldark = 0x505450, menupallight = 0xA8A8A8, menupalwhite = 0xF8FCF8;
+ int filtervalue[12] = {135, 20, 0, 25, 0, 125, 20, 25, 0, 20, 105, 30};
+-#ifndef VERSION_FUNKEYS
++#ifdef MEUPOCKETGB
++// MeuPocketGB: the game fills the small screen (fast scaler), never a border around it
++std::string selectedscaler= "FullScreen Fast", dmgbordername = "NONE", gbcbordername = "NONE", palname = "DEFAULT", filtername = "NONE", currgamename = "default";
++#elif !defined VERSION_FUNKEYS
+ std::string selectedscaler= "No Scaling", dmgbordername = "DEFAULT", gbcbordername = "DEFAULT", palname = "DEFAULT", filtername = "NONE", currgamename = "default";
+ #else
+ std::string selectedscaler= "1.5x Smooth", dmgbordername = "NONE", gbcbordername = "NONE", palname = "DEFAULT", filtername = "NONE", currgamename = "default";
+@@ -2470,4 +2473,8 @@ void loadConfig(){
+ 		}
+ 	}
+ 	fclose(cfile);
++#ifdef MEUPOCKETGB
++	dmgbordername = "NONE"; // no border option in MeuPocketGB (small screen)
++	gbcbordername = "NONE";
++#endif
+ }
+diff --git a/gambatte_sdl/menu.cpp b/gambatte_sdl/menu.cpp
+index 02c287e..9b8e633 100644
+--- a/gambatte_sdl/menu.cpp
++++ b/gambatte_sdl/menu.cpp
+@@ -1133,16 +1133,6 @@ static void mpgb_apply_palette(const std::string &v, int) {
+         load_border(dmgbordername);
+ }
+ static void mpgb_apply_filter(const std::string &v, int) { filtername = v; loadFilter(filtername); }
+-static void mpgb_apply_dmgborder(const std::string &v, int) {
+-    dmgbordername = v;
+-    if (gameiscgb == 0)
+-        load_border(dmgbordername);
+-}
+-static void mpgb_apply_gbcborder(const std::string &v, int) {
+-    gbcbordername = v;
+-    if (gameiscgb == 1)
+-        load_border(gbcbordername);
+-}
+ static void mpgb_apply_system(const std::string &, int i) { prefercgb = i; }
+ static void mpgb_apply_ghosting(const std::string &, int i) { ghosting = i; }
+ static void mpgb_apply_bios(const std::string &, int i) { biosenabled = i; }
+@@ -1263,17 +1253,6 @@ static void mpgb_cb_options(menu_t *caller_menu) {
+         mpgb_add_option(menu, "Filtro de cor (GBC)", "Ajuste das cores dos jogos de Game Boy Color.", s, v,
+                         filtername, mpgb_apply_filter);
+     }
+-    {
+-        std::vector<std::string> s, v, files = mpgb_list_files("borders", parse_ext_png);
+-        s.push_back("Nenhuma"); v.push_back("NONE");
+-        s.push_back("Padrão"); v.push_back("DEFAULT");
+-        s.push_back("Automática"); v.push_back("AUTO");
+-        for (size_t i = 0; i < files.size(); ++i) { s.push_back(strip_Extension(files[i])); v.push_back(files[i]); }
+-        mpgb_add_option(menu, "Moldura (GB)", "Imagem em volta dos jogos de Game Boy.", s, v, dmgbordername,
+-                        mpgb_apply_dmgborder);
+-        mpgb_add_option(menu, "Moldura (GBC)", "Imagem em volta dos jogos de Game Boy Color.", s, v, gbcbordername,
+-                        mpgb_apply_gbcborder);
+-    }
+     {
+         const char *s[] = { "Game Boy", "Game Boy Color" };
+         mpgb_add_choice(menu, "Sistema preferido", "Para cartuchos que rodam nos dois. Vale no próximo jogo.",
+@@ -1303,7 +1282,7 @@ static void mpgb_cb_options(menu_t *caller_menu) {
+     }
+     {
+         const char *s[] = { "Tudo junto", "Por pasta" };
+-        mpgb_add_choice(menu, "Lista de jogos", "Todos os jogos numa lista, ou separados por pasta (GB, GBC...).",
++        mpgb_add_choice(menu, "Lista de jogos", "Todos juntos ou separados por pasta (GB, GBC).",
+                         s, 2, mpgb_list_by_folder, mpgb_apply_list_mode);
+     }
+     mpgb_add_action(menu, "Reiniciar jogo", "Volta o jogo para o começo (o save do jogo fica).", mpgb_cb_restart);
